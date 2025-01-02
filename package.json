@@ -1,16 +1,10 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A flexible RPC library using NATS",
   "main": "build/index.js",
   "module": "build/index.mjs",
   "types": "build/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./build/index.d.ts",
-      "import": "./build/index.mjs"
-    }
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
@@ -19,12 +13,9 @@
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
-    "source": "generate-source output=source.md exclude=build/",
+    "source": "generate-source output=source.md exclude=build/,README.md",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "prepack": "npm run build",
-    "build:types": "tsc --emitDeclarationOnly",
-    "build:js": "bun build ./src/index.ts --outdir ./build --target node",
-    "build": "npm run build:types && npm run build:js"
+    "build": "bun build ./src/index.ts --outdir ./build --target node"
   },
   "keywords": [
     "rpc",

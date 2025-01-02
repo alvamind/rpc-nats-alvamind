@@ -3,17 +3,19 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "lib": ["ESNext"],
     "declaration": true,
-    "declarationDir": "build",
-    "emitDeclarationOnly": true,
+    "outDir": "build",
+    "types": ["bun-types", "@types/jest"],
     "sourceMap": true,
     "strict": true,
-    "esModuleInterop": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "noEmit": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "build", "test"]
+  "include": ["src/**/*.ts", "src/*.ts", "test/**/*.ts", "test/*.ts"],
+  "exclude": ["node_modules"]
 }
