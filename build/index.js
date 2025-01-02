@@ -16901,7 +16901,12 @@ function createProxyController(controller, nats) {
     get(target, prop, receiver) {
       if (typeof target[prop] === "function") {
         return async (...args) => {
-          return nats.call(prop, args[0]);
+          const subjectPattern = nats.getOptions.subjectPattern;
+          if (!subjectPattern) {
+            throw new Error("Subject pattern is undefined");
+          }
+          const subject = subjectPattern(target.constructor.name, prop);
+          return nats.call(subject, args[0]);
         };
       }
       return Reflect.get(target, prop, receiver);
@@ -16920,6 +16925,9 @@ class NatsRpc {
   constructor(options) {
     this.options = options;
   }
+  get getOptions() {
+    return this.options;
+  }
   async ensureConnection() {
     if (!this.isConnected) {
       await this.connect();
@@ -16936,8 +16944,11 @@ class NatsRpc {
       });
     }
   }
-  async call(methodName, data) {
-    return Promise.reject(new Error("Must call using controller proxy"));
+  async call(subject, data) {
+    await this.ensureConnection();
+    const response = await this.nc.request(subject, new TextEncoder().encode(JSON.stringify(data)));
+    const decoded = new TextDecoder().decode(response.data);
+    return JSON.parse(decoded);
   }
   async register(subject, handler) {
     await this.ensureConnection();

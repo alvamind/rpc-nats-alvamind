@@ -12,6 +12,9 @@ export class NatsRpc implements INatsRpc {
   constructor(options: NatsRpcOptions) {
     this.options = options;
   }
+  get getOptions() {
+    return this.options;
+  }
   private async ensureConnection() {
     if (!this.isConnected) {
       await this.connect();
@@ -28,9 +31,11 @@ export class NatsRpc implements INatsRpc {
       });
     }
   }
-  async call<T, R>(methodName: string, data: T): Promise<R> {
-    // <-- Ubah parameter subject jadi namaMethod
-    return Promise.reject(new Error('Must call using controller proxy'));
+  async call<T, R>(subject: string, data: T): Promise<R> {
+    await this.ensureConnection();
+    const response = await this.nc!.request(subject, new TextEncoder().encode(JSON.stringify(data)));
+    const decoded = new TextDecoder().decode(response.data);
+    return JSON.parse(decoded) as R;
   }
   async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
     await this.ensureConnection();

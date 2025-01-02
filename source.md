@@ -41,7 +41,7 @@ test/*.snap
 // package.json
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "A flexible RPC library using NATS",
   "main": "build/index.js",
   "module": "build/index.mjs",
