@@ -1,0 +1,34 @@
+{
+  "name": "rpc-nats-alvamind",
+  "version": "1.0.0",
+  "description": "A flexible RPC library using NATS",
+  "main": "build/index.js",
+   "module": "build/index.mjs",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "bun run tsc",
+    "test": "echo 'no test yet'",
+    "prepare": "bun run build"
+  },
+  "keywords": [
+    "rpc",
+    "nats",
+    "microservices",
+    "typescript",
+    "dependency-injection"
+  ],
+    "files": [
+    "build"
+    ],
+  "author": "Alvamind",
+  "license": "MIT",
+  "dependencies": {
+    "nats": "^2.19.0",
+     "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "typescript": "^5.3.3",
+    "bun-types": "latest"
+  }
+}
