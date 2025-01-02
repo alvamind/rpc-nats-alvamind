@@ -53,7 +53,7 @@ describe('NatsRpc', () => {
     try {
       await natsRpc.call(subject, {});
     } catch (error) {
-      expect(error.message).toBe('Test error');
+      expect((error as Error).message).toBe('Test error');
     }
   });
 
@@ -68,7 +68,9 @@ describe('NatsRpc', () => {
 
     await natsRpc.registerController('TestController');
 
-    const response = await natsRpc.call<{ name: string }, { message: string }>('TestController.hello', { name: 'World' });
+    const response = await natsRpc.call<{ name: string }, { message: string }>('TestController.hello', {
+      name: 'World',
+    });
     expect(response).toEqual({ message: 'Hello, World' });
   });
 

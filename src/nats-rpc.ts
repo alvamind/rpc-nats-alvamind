@@ -1,12 +1,14 @@
 import { connect, NatsConnection } from 'nats';
-import { DependencyResolver, MethodMetadata, NatsRpcOptions, RPCHandler } from './types';
-import { getAllControllerMethods } from './nats-scanner';
+import { DependencyResolver, MethodMetadata, NatsRpcOptions, RPCHandler, INatsRpc } from './types';
+import { generateNatsSubject, getAllControllerMethods } from './nats-scanner';
+import { createProxyController } from './nats-proxy';
 
-export class NatsRpc {
+export class NatsRpc implements INatsRpc {
   private nc?: NatsConnection;
   private handlers = new Map<string, RPCHandler<any, any>>();
   private isConnected = false;
   private options: NatsRpcOptions;
+  private controllerProxies = new Map<string, any>();
   constructor(options: NatsRpcOptions) {
     this.options = options;
   }
@@ -26,19 +28,9 @@ export class NatsRpc {
       });
     }
   }
-  async call<T, R>(subject: string, data: T): Promise<R> {
-    await this.ensureConnection();
-    try {
-      const encodedData = new TextEncoder().encode(JSON.stringify(data));
-      const response = await this.nc!.request(subject, encodedData, {
-        timeout: this.options.requestTimeout ?? 10000, // Increase timeout to 10 seconds or using default
-      });
-      const decodedData = new TextDecoder().decode(response.data);
-      return JSON.parse(decodedData) as R;
-    } catch (error) {
-      console.error(`[NATS] Error calling ${subject}:`, error);
-      throw error;
-    }
+  async call<T, R>(methodName: string, data: T): Promise<R> {
+    // <-- Ubah parameter subject jadi namaMethod
+    return Promise.reject(new Error('Must call using controller proxy'));
   }
   async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
     await this.ensureConnection();
@@ -86,10 +78,19 @@ export class NatsRpc {
         console.error(`[NATS] Failed to register handler for ${subject} `, e);
       }
     }
+    const proxy = createProxyController(instance, this);
+    this.controllerProxies.set(instance.constructor.name, proxy);
   }
   close() {
     if (this.nc) {
       this.nc.close();
     }
+  }
+  public getControllerProxy<T>(controllerName: string): T {
+    const controller = this.controllerProxies.get(controllerName);
+    if (!controller) {
+      throw new Error(`Controller ${controllerName} not found in registry`);
+    }
+    return controller;
   }
 }
