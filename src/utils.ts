@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { MethodMetadata } from './types';
 
 export function getAllInterfaceMethods(target: any): MethodMetadata[] {
   const methods: MethodMetadata[] = [];

@@ -6,10 +6,10 @@ export class NatsRpc {
   private nc?: NatsConnection;
   private handlers = new Map<string, RPCHandler<any, any>>();
   private isConnected = false;
-  private options:NatsRpcOptions;
+  private options: NatsRpcOptions;
   constructor(options: NatsRpcOptions) {
     this.options = options;
-   }
+  }
   private async ensureConnection() {
     if (!this.isConnected) {
       await this.connect();
@@ -26,7 +26,7 @@ export class NatsRpc {
       });
     }
   }
-   async call<T, R>(subject: string, data: T): Promise<R> {
+  async call<T, R>(subject: string, data: T): Promise<R> {
     await this.ensureConnection();
     try {
       const encodedData = new TextEncoder().encode(JSON.stringify(data));
@@ -57,23 +57,26 @@ export class NatsRpc {
           const response = new TextEncoder().encode(JSON.stringify(result));
           msg.respond(response);
         } catch (error) {
-           console.error(`[NATS] Error processing message for ${subject}:`, error);
-            if(this.options.errorHandler){
-                this.options.errorHandler(error,subject)
-                const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
-                msg.respond(errorResponse);
-            } else {
-               const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
-               msg.respond(errorResponse);
-            }
+          console.error(`[NATS] Error processing message for ${subject}:`, error);
+          if (this.options.errorHandler) {
+            this.options.errorHandler(error, subject);
+            const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
+            msg.respond(errorResponse);
+          } else {
+            const errorResponse = new TextEncoder().encode(JSON.stringify({ error: (error as Error).message }));
+            msg.respond(errorResponse);
+          }
         }
       }
     })().catch((err) => console.error(`[NATS] Subscription error:`, err));
   }
   async registerController(token: any) {
-     const instance = this.options.dependencyResolver.resolve(token);
-        if(!instance) throw new Error(`Instance not found for token ${String(token)}`)
-      const methods = getAllControllerMethods(instance, this.options.subjectPattern ?? ((className:string, methodName:string)=>`${className}.${methodName}`));
+    const instance: Record<string, (...args: any[]) => any> = this.options.dependencyResolver.resolve(token);
+    if (!instance) throw new Error(`Instance not found for token ${String(token)}`);
+    const methods = getAllControllerMethods(
+      instance,
+      this.options.subjectPattern ?? ((className: string, methodName: string) => `${className}.${methodName}`),
+    );
     for (const { key, subject } of methods) {
       try {
         await this.register(subject, async (data: any) => {

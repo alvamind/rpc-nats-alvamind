@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "description": "A flexible RPC library using NATS",
   "main": "build/index.js",
-   "module": "build/index.mjs",
+  "module": "build/index.mjs",
   "types": "build/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
+  },
   "scripts": {
     "build": "bun run tsc",
     "test": "echo 'no test yet'",
@@ -17,14 +21,15 @@
     "typescript",
     "dependency-injection"
   ],
-    "files": [
+  "files": [
     "build"
-    ],
+  ],
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
     "nats": "^2.19.0",
-     "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "tsyringe-neo": "^5.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",

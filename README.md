@@ -18,7 +18,7 @@ A flexible and powerful RPC (Remote Procedure Call) library using NATS as a mess
 ## Installation
 
 ```bash
-npm install your-rpc-nats-lib
+npm install rpc-nats-alvamind
 ```
 
 ## Usage
@@ -203,7 +203,7 @@ Used for configuration.
 
 ## Examples
 
-You can find more examples in the [GitHub repository](https://github.com/your-username/your-rpc-nats-repo).
+You can find more examples in the [GitHub repository](https://github.com/alvamind/rpc-nats-alvamind).
 
 ## Contributing
 
