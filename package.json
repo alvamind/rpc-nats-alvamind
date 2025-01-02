@@ -14,7 +14,8 @@
     "compose": "docker compose up -d",
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/,README.md",
-    "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'"
+    "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
+    "build": "bun build ./src/index.ts --outdir ./build --target node"
   },
   "keywords": [
     "rpc",
