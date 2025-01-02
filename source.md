@@ -200,11 +200,18 @@ This library is licensed under the MIT License.
 // package.json
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A flexible RPC library using NATS",
   "main": "build/index.js",
   "module": "build/index.mjs",
   "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "require": "./build/index.js",
+      "import": "./build/index.mjs"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
@@ -215,7 +222,10 @@ This library is licensed under the MIT License.
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "build": "bun build ./src/index.ts --outdir ./build --target node"
+    "prepack": "npm run build",
+    "build:types": "tsc --emitDeclarationOnly",
+    "build:js": "bun build ./src/index.ts --outdir ./build --target node",
+    "build": "npm run build:types && npm run build:js"
   },
   "keywords": [
     "rpc",
@@ -258,9 +268,10 @@ export class TsyringeResolver implements DependencyResolver {
 }
 
 // src/index.ts
-export * from './nats-rpc';
-export * from './types';
-export * from './dependency-resolvers'
+export { NatsRpc } from './nats-rpc';
+export type { INatsRpc, DependencyResolver, NatsRpcOptions, MethodMetadata, RPCHandler } from './types';
+export * from './dependency-resolvers';
+export * from './nats-proxy';
 
 // src/nats-proxy.ts
 import 'reflect-metadata';
@@ -285,10 +296,10 @@ export function createProxyController<T>(controller: T, nats: NatsRpc): T {
 
 // src/nats-rpc.ts
 import { connect, NatsConnection } from 'nats';
-import { DependencyResolver, MethodMetadata, NatsRpcOptions, RPCHandler } from './types';
+import { DependencyResolver, MethodMetadata, NatsRpcOptions, RPCHandler, INatsRpc } from './types';
 import { generateNatsSubject, getAllControllerMethods } from './nats-scanner';
 import { createProxyController } from './nats-proxy';
-export class NatsRpc {
+export class NatsRpc implements INatsRpc {
   private nc?: NatsConnection;
   private handlers = new Map<string, RPCHandler<any, any>>();
   private isConnected = false;
@@ -370,7 +381,7 @@ export class NatsRpc {
       this.nc.close();
     }
   }
-  getControllerProxy<T>(controllerName: string): T {
+  public getControllerProxy<T>(controllerName: string): T {
     const controller = this.controllerProxies.get(controllerName);
     if (!controller) {
       throw new Error(`Controller ${controllerName} not found in registry`);
@@ -419,11 +430,12 @@ export interface MethodMetadata {
 export interface RPCHandler<T, R> {
   (data: T): Promise<R>;
 }
-export interface NatsRpc {
+export interface INatsRpc {
   connect(): Promise<void>;
   call<T, R>(methodName: string, data: T): Promise<R>;
   registerController(token: any): Promise<void>;
   getControllerProxy<T>(controllerName: string): T;
+  close(): void;
 }
 
 // src/utils.ts
@@ -445,22 +457,18 @@ export function getAllInterfaceMethods(target: any): MethodMetadata[] {
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ESNext"],
     "declaration": true,
-    "outDir": "build",
-    "types": ["bun-types", "@types/jest"],
+    "declarationDir": "build",
+    "emitDeclarationOnly": true,
     "sourceMap": true,
     "strict": true,
-    "skipLibCheck": true,
-    "noEmit": false,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "declarationDir": "build",
-    "isolatedModules": false
+    "emitDecoratorMetadata": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
   },
-  "include": ["src*.ts", "src*.ts", "test/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src*"],
+  "exclude": ["node_modules", "build", "test"]
 }
 
