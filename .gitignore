@@ -1,0 +1,40 @@
+# Node Modules
+node_modules/
+
+# Build Output
+build/
+dist/
+coverage/
+
+# Temporary Files and Folders
+.bun/
+.turbo/
+.eslintcache/
+.parcel-cache/
+.next/
+.cache/
+.DS_Store
+*.log
+*.lock
+*.sqlite
+
+# IDE Files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# System Files
+__pycache__/
+.env
+
+# OS or Editor
+*.swp
+*.swo
+*~
+# Test Files
+
+test/coverage/
+test/*.snap
