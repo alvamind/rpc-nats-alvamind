@@ -10,9 +10,11 @@
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
   "scripts": {
-    "build": "bun run tsc",
-    "test": "echo 'no test yet'",
-    "prepare": "bun run build"
+    "dev": "bun run src/index.ts --watch",
+    "compose": "docker compose up -d",
+    "commit": "commit",
+    "source": "generate-source output=source.md exclude=build/,README.md",
+    "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'"
   },
   "keywords": [
     "rpc",
@@ -27,13 +29,14 @@
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
+    "alvamind-tools": "^1.0.1",
     "nats": "^2.19.0",
     "reflect-metadata": "^0.2.2",
     "tsyringe-neo": "^5.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
-    "typescript": "^5.3.3",
-    "bun-types": "latest"
+    "bun-types": "^1.1.42",
+    "typescript": "^5.3.3"
   }
 }
