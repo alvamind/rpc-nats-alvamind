@@ -1,9 +1,4 @@
-// Core
-export { NatsRpc } from './nats-rpc';
-
-// Types
-export type { INatsRpc, DependencyResolver, NatsRpcOptions, MethodMetadata, RPCHandler } from './types';
-
-// Utilities
-export { createProxyController } from './nats-proxy';
-export { TsyringeResolver } from './dependency-resolvers';
+export { NatsClient } from './nats-client';
+export { NatsRegistry } from './nats-registry';
+export { NatsScanner } from './nats-scanner';
+export type { NatsOptions, ClassInfo, MethodInfo, Payload, RetryConfig, Codec, ErrorObject } from './types';

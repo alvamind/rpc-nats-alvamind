@@ -6,7 +6,7 @@
     "lib": ["ESNext"],
     "declaration": true,
     "outDir": "build",
-    "types": ["bun-types", "@types/jest"],
+    "types": ["bun-types"],
     "sourceMap": true,
     "strict": true,
     "skipLibCheck": true,
