@@ -95,12 +95,12 @@ import { connect, NatsConnection, Codec, JSONCodec, StringCodec } from 'nats';
 import { NatsOptions, RetryConfig, Payload, ErrorObject } from './types';
 import { NatsRegistry } from './nats-registry';
 import { pino, Logger } from 'pino';
-export class NatsClient {
+export class NatsClient<T extends Record<string, any> = Record<string, any>> {
   private nc?: NatsConnection;
   private isConnected = false;
-  private registry!: NatsRegistry;
+  private registry!: NatsRegistry<T>;
   private options!: NatsOptions;
-  private logger!: Logger; // <-- Use Logger interface
+  private logger!: Logger;
   private defaultRetryConfig: RetryConfig = {
     maxRetries: 3,
     initialDelay: 100,
@@ -119,16 +119,16 @@ export class NatsClient {
       codec: options.codec ?? JSONCodec(),
       scanPath: options.scanPath,
     };
-    this.logger = this.options.logger ?? pino(); // <--- Use custom logger or default
+    this.logger = this.options.logger ?? pino();
     this.logger.info(`[NATS] Connecting to ${options.natsUrl}`);
     if (this.isConnected) {
       this.logger.warn('[NATS] Already connected, closing current connection to re-initiate.');
       await this.close();
     }
-    this.sc = this.options.codec;
+    this.sc = this.options.codec ?? JSONCodec();
     const scanPath = this.options.scanPath ?? './';
     this.nc = await connect({ servers: this.options.natsUrl });
-    this.registry = new NatsRegistry(this.nc, this.options, this.logger);
+    this.registry = new NatsRegistry<T>(this.nc, this.options, this.logger);
     await this.registry.registerHandlers(scanPath);
     this.isConnected = true;
     this.logger.info(`[NATS] Successfully Connected to ${this.options.natsUrl}`);
@@ -150,19 +150,19 @@ export class NatsClient {
       this.isConnected = false;
     }
   }
-  async request<T, R>(subject: string, data: T, retryConfig?: RetryConfig): Promise<R> {
+  async request<Req, Res>(subject: string, data: Req, retryConfig?: RetryConfig): Promise<Res> {
     if (!this.isConnected) throw new Error(`Nats is not connected`);
     const config = retryConfig ? { ...this.defaultRetryConfig, ...retryConfig } : this.options.retryConfig;
-    return this.performRequest<T, R>(subject, data, config!);
+    return this.performRequest<Req, Res>(subject, data, config!);
   }
-  private async performRequest<T, R>(
+  private async performRequest<Req, Res>(
     subject: string,
-    data: T,
+    data: Req,
     retryConfig: RetryConfig,
     attempt: number = 0,
-  ): Promise<R> {
+  ): Promise<Res> {
     try {
-      const payload: Payload<T> = {
+      const payload: Payload<Req> = {
         subject,
         data,
         context: this.options.context,
@@ -171,7 +171,7 @@ export class NatsClient {
         timeout: this.options.requestTimeout ?? 3000,
       });
       const decoded = this.sc.decode(response.data);
-      return decoded as R;
+      return decoded as Res;
     } catch (error: any) {
       if (attempt >= (retryConfig.maxRetries || 0)) {
         if (this.options.dlqSubject) {
@@ -222,7 +222,7 @@ export class NatsClient {
       this.nc = undefined;
     }
   }
-  getExposedMethods() {
+  getExposedMethods(): T {
     if (!this.registry) throw new Error(`Nats registry is not initialized.`);
     return this.registry.getExposedMethods();
   }
@@ -261,12 +261,12 @@ import { NatsOptions, ClassInfo, Payload, ErrorObject } from './types';
 import { NatsScanner } from './nats-scanner';
 import { generateNatsSubject } from './utils';
 import { Logger } from 'pino';
-export class NatsRegistry {
+export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private handlers = new Map<string, Function>();
   private wildcardHandlers = new Map<string, Function>();
   private natsConnection: NatsConnection;
   private options: NatsOptions;
-  private exposedMethods: Record<string, any> = {};
+  private exposedMethods: Partial<T> = {};
   private logger: Logger;
   private sc: Codec<any>;
   private classCount = 0;
@@ -274,8 +274,8 @@ export class NatsRegistry {
   constructor(natsConnection: NatsConnection, options: NatsOptions, logger: Logger) {
     this.natsConnection = natsConnection;
     this.options = options;
-    this.logger = logger; // Use injected logger
-    this.sc = this.options.codec;
+    this.logger = logger;
+    this.sc = this.options.codec ?? JSONCodec();
   }
   async registerHandlers(path: string) {
     this.logger.info(`[NATS] Registering handlers in ${path}`);
@@ -285,7 +285,8 @@ export class NatsRegistry {
     }
     for (const classInfo of classes) {
       this.classCount++;
-      const controller = (this.exposedMethods[classInfo.className] = {});
+      (this.exposedMethods as any)[classInfo.className] = {};
+      const controller = (this.exposedMethods as any)[classInfo.className];
       for (const methodInfo of classInfo.methods) {
         this.methodCount++;
         const subject = generateNatsSubject(
@@ -376,8 +377,8 @@ export class NatsRegistry {
   getAllSubjects() {
     return Array.from(this.handlers.keys());
   }
-  getExposedMethods() {
-    return this.exposedMethods;
+  getExposedMethods(): T {
+    return this.exposedMethods as T;
   }
   async callHandler<T>(subject: string, data: any): Promise<T> {
     if (!this.natsConnection) throw new Error('Nats connection is not established yet.');
@@ -512,10 +513,16 @@ interface MathRequest {
 interface MathResponse {
   result: number;
 }
+interface ExposedMethods {
+  MathService: {
+    add: (data: MathRequest) => Promise<MathResponse>;
+    subtract: (data: MathRequest) => Promise<MathResponse>;
+  };
+}
 async function main() {
   const options: NatsOptions = {
     natsUrl: 'nats://localhost:4222',
-    scanPath: './test/services', // <---- Updated scan path
+    scanPath: './test/services',
     streaming: false,
     retryConfig: {
       maxRetries: 3,
@@ -527,7 +534,7 @@ async function main() {
       serviceName: 'math-service',
     },
   };
-  const client = new NatsClient();
+  const client = new NatsClient<ExposedMethods>(); // Pass the type here
   await client.connect(options);
   const exposedMethods = client.getExposedMethods();
   console.log('Exposed method', exposedMethods);
