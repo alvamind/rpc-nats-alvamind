@@ -2,6 +2,7 @@ import { connect, NatsConnection } from 'nats';
 import { DependencyResolver, MethodMetadata, NatsRpcOptions, RPCHandler, INatsRpc } from './types';
 import { generateNatsSubject, getAllControllerMethods } from './nats-scanner';
 import { createProxyController } from './nats-proxy';
+import { delay } from 'tsyringe-neo';
 
 export class NatsRpc implements INatsRpc {
   private nc?: NatsConnection;
@@ -26,7 +27,7 @@ export class NatsRpc implements INatsRpc {
       this.isConnected = true;
       console.log(`[NATS] Connected to ${this.options.natsUrl}`);
       this.nc.closed().then(() => {
-        console.log('[NATS] Connection closed');
+        console.log('[RPC-NATS-LIB] Connection closed');
         this.isConnected = false;
       });
     }
@@ -40,7 +41,7 @@ export class NatsRpc implements INatsRpc {
   async register<T, R>(subject: string, handler: RPCHandler<T, R>) {
     await this.ensureConnection();
     if (this.handlers.has(subject)) {
-      console.warn(`[NATS] Handler already registered for subject: ${subject}`);
+      console.warn(`[RPC-NATS-LIB] Handler already registered for subject: ${subject}`);
       return;
     }
     this.handlers.set(subject, handler);
@@ -68,7 +69,20 @@ export class NatsRpc implements INatsRpc {
     })().catch((err) => console.error(`[NATS] Subscription error:`, err));
   }
   async registerController(token: any) {
-    const instance: Record<string, (...args: any[]) => any> = this.options.dependencyResolver.resolve(token);
+    const instanceOrDelayed: Record<string, (...args: any[]) => any> | (() => Record<string, (...args: any[]) => any>) =
+      this.options.dependencyResolver.resolve(token);
+    let instance: Record<string, (...args: any[]) => any>;
+
+    if (typeof instanceOrDelayed === 'function') {
+      // If it's a delayed constructor, resolve it
+      instance = (await this.options.dependencyResolver.resolve(instanceOrDelayed)) as Record<
+        string,
+        (...args: any[]) => any
+      >;
+    } else {
+      instance = instanceOrDelayed as Record<string, (...args: any[]) => any>;
+    }
+
     if (!instance) throw new Error(`Instance not found for token ${String(token)}`);
     const methods = getAllControllerMethods(
       instance,
