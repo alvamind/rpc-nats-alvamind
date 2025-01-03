@@ -1,9 +1,17 @@
 # Project: rpc-nats-alvamind
 
+prisma
 src
 test
 test/services
 ====================
+// .env
+# Environment variables declared in this file are automatically made available to Prisma.
+# See the documentation for more detail: https://pris.ly/d/prisma-schema#accessing-environment-variables-from-the-schema
+# Prisma supports the native connection string format for PostgreSQL, MySQL, SQLite, SQL Server, MongoDB and CockroachDB.
+# See the documentation for all the connection string options: https://pris.ly/d/connection-strings
+DATABASE_URL="file:./dev.db"
+
 // .gitignore
 # Node Modules
 node_modules/
@@ -52,6 +60,9 @@ test/*.snap
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
+  "prisma": {
+      "seed": "bunx ts-node --esm --loader ts-node/esm prisma/seed.ts"
+  },
   "scripts": {
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
@@ -72,6 +83,7 @@ test/*.snap
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
+    "@prisma/client": "6.1.0",
     "alvamind-tools": "^1.0.2",
     "nats": "^2.28.2",
     "pino": "^8.21.0",
@@ -80,9 +92,32 @@ test/*.snap
   "devDependencies": {
     "@types/node": "^20.17.11",
     "bun-types": "^1.1.42",
+    "prisma": "^6.1.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
 }
+
+// prisma/seed.ts
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+async function main() {
+  await prisma.user.create({
+    data: {
+      email: 'test@email.com',
+      name: 'test',
+    },
+  });
+}
+main()
+  .then(async () => {
+    await prisma.$disconnect();
+  })
+  .catch(async (e) => {
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });
 
 // src/index.ts
 export { NatsClient } from './nats-client';
@@ -256,11 +291,15 @@ export class NatsClient<T extends Record<string, any> = Record<string, any>> {
 }
 
 // src/nats-registry.ts
-import { NatsConnection, Codec, JSONCodec, Subscription } from 'nats';
-import { NatsOptions, ClassInfo, Payload, ErrorObject } from './types';
+import { NatsConnection, Codec, JSONCodec } from 'nats';
+import { NatsOptions, ClassInfo, Payload, ErrorObject, MethodInfo } from './types';
 import { NatsScanner } from './nats-scanner';
 import { generateNatsSubject } from './utils';
 import { Logger } from 'pino';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { ImportDeclaration, SourceFile, SyntaxKind } from 'typescript';
+import * as fss from 'fs';
 export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private handlers = new Map<string, Function>();
   private wildcardHandlers = new Map<string, Function>();
@@ -271,6 +310,8 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private sc: Codec<any>;
   private classCount = 0;
   private methodCount = 0;
+  private classInfos: ClassInfo[] = [];
+  private typeAlias: Record<string, string> = {};
   constructor(natsConnection: NatsConnection, options: NatsOptions, logger: Logger) {
     this.natsConnection = natsConnection;
     this.options = options;
@@ -283,6 +324,7 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     if (classes.length === 0) {
       this.logger.warn(`[NATS] No exported class found in ${path}.`);
     }
+    this.classInfos = classes;
     for (const classInfo of classes) {
       this.classCount++;
       (this.exposedMethods as any)[classInfo.className] = {};
@@ -303,7 +345,111 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       `[NATS] Finished registering handlers in ${path}. Total class: ${this.classCount}  Total methods: ${this.methodCount}`,
     );
   }
-  private async registerHandler(subject: string, handler: Function) {
+  async generateExposedMethodsType(outputPath: string = 'src/generated/exposed-methods.d.ts') {
+    const interfaceString = this.generateInterfaceString();
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, interfaceString, 'utf-8');
+    this.logger.info(`[NATS] Exposed method type generate successfully to ${outputPath}`);
+  }
+  private generateInterfaceString() {
+    let interfaceString = '\n\n';
+    interfaceString += 'export interface ExposedMethods {\n';
+    for (const classInfo of this.classInfos) {
+      interfaceString += `  ${classInfo.className}: {\n`;
+      for (const methodInfo of classInfo.methods) {
+        const paramType = this.getMethodParamType(methodInfo);
+        const returnType = this.getMethodReturnType(methodInfo);
+        interfaceString += `    ${methodInfo.methodName}: <T extends ${returnType}>(data: ${paramType}) => Promise<T>;\n`;
+      }
+      interfaceString += `  };\n`;
+    }
+    interfaceString += '}\n';
+    if (Object.keys(this.typeAlias).length > 0) {
+      interfaceString += '\n';
+      for (const [name, value] of Object.entries(this.typeAlias)) {
+        interfaceString = `${value}\n${interfaceString}`;
+      }
+    }
+    return interfaceString;
+  }
+  private getMethodReturnType(methodInfo: MethodInfo): string {
+    const returnType = (Reflect as any).getMetadata('design:returntype', methodInfo.func);
+    if (!returnType) {
+      return 'any';
+    }
+    const typeName = returnType.name;
+    if (typeName === 'Promise') {
+      const promiseType = (Reflect as any).getMetadata('design:returntype', methodInfo.func)?.arguments?.[0];
+      if (!promiseType) {
+        return 'any';
+      }
+      return this.resolveTypeName(promiseType);
+    }
+    return this.resolveTypeName(returnType);
+  }
+  private getMethodParamType(methodInfo: MethodInfo): string {
+    const paramTypes = (Reflect as any).getMetadata('design:paramtypes', methodInfo.func) as any[];
+    if (!paramTypes || paramTypes.length === 0) {
+      return 'any';
+    }
+    return this.resolveTypeName(paramTypes[0]);
+  }
+  private resolveTypeName(target: any): string {
+    if (!target) {
+      return 'any';
+    }
+    const name = target.name;
+    if (name === 'Object') {
+      return 'any';
+    }
+    if (name === 'String' || name === 'Number' || name === 'Boolean') {
+      return name.toLowerCase();
+    }
+    if (name === 'Array') {
+      return 'any[]';
+    }
+    if (name === 'Date') {
+      return 'Date';
+    }
+    try {
+      const importInfo = this.findImportStatement(target);
+      if (importInfo) {
+        this.typeAlias[name] = importInfo;
+        return name;
+      }
+    } catch (error) {}
+    return 'any';
+  }
+  private findImportStatement(target: any): string | undefined {
+    const filePath = target.__proto__.constructor.name;
+    if (!filePath) {
+      return undefined;
+    }
+    const modulePath = path.resolve(filePath);
+    if (fss.existsSync(modulePath)) {
+      const sourceFile = NatsScanner.getTypeScriptSourceFile(modulePath);
+      if (!sourceFile) return;
+      const imports = sourceFile.statements.filter(
+        (statement): statement is ImportDeclaration => statement.kind === SyntaxKind.ImportDeclaration,
+      );
+      for (const importDeclaration of imports) {
+        const namedBindings = importDeclaration.importClause?.namedBindings;
+        if (namedBindings && namedBindings.kind === SyntaxKind.NamedImports) {
+          for (const importSpecifier of namedBindings.elements) {
+            if (importSpecifier.name.text === target.name) {
+              const module = (importDeclaration.moduleSpecifier as any).text;
+              return `import {${target.name}} from '${module}';`;
+            }
+          }
+        } else if (importDeclaration.importClause?.name?.text === target.name) {
+          const module = (importDeclaration.moduleSpecifier as any).text;
+          return `import ${target.name} from '${module}';`;
+        }
+      }
+    }
+    return undefined;
+  }
+  protected async registerHandler(subject: string, handler: Function) {
     if (this.handlers.has(subject)) {
       this.logger.warn(`[RPC-NATS-LIB] Handler already registered for subject: ${subject}`);
       return;
@@ -346,7 +492,20 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       this.registerStreamHandler(subject, subscription);
     }
   }
-  private async registerStreamHandler(subject: string, subscription: Subscription) {
+  protected async callHandler<T>(subject: string, data: any): Promise<T> {
+    if (!this.natsConnection) throw new Error('Nats connection is not established yet.');
+    const payload: Payload<any> = {
+      subject,
+      data,
+      context: this.options.context,
+    };
+    const response = await this.natsConnection!.request(subject, this.sc.encode(payload), {
+      timeout: this.options.requestTimeout ?? 3000,
+    });
+    const decoded = this.sc.decode(response.data);
+    return decoded as T;
+  }
+  protected async registerStreamHandler(subject: string, subscription: any) {
     for await (const msg of subscription) {
       try {
         const decodedData = this.sc.decode(msg.data);
@@ -362,10 +521,10 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       }
     }
   }
-  getHandler(subject: string) {
+  protected getHandler(subject: string) {
     return this.handlers.get(subject);
   }
-  findWildcardHandler(subject: string) {
+  protected findWildcardHandler(subject: string) {
     for (const [key, handler] of this.wildcardHandlers) {
       const regex = new RegExp(`^${key.replace(/\*/g, '[^.]*')}$`);
       if (regex.test(subject)) {
@@ -374,31 +533,16 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     }
     return undefined;
   }
-  getAllSubjects() {
-    return Array.from(this.handlers.keys());
-  }
-  getExposedMethods(): T {
+  public getExposedMethods(): T {
     return this.exposedMethods as T;
-  }
-  async callHandler<T>(subject: string, data: any): Promise<T> {
-    if (!this.natsConnection) throw new Error('Nats connection is not established yet.');
-    const payload: Payload<any> = {
-      subject,
-      data,
-      context: this.options.context,
-    };
-    const response = await this.natsConnection!.request(subject, this.sc.encode(payload), {
-      timeout: this.options.requestTimeout ?? 3000,
-    });
-    const decoded = this.sc.decode(response.data);
-    return decoded as T;
   }
 }
 
 // src/nats-scanner.ts
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
 import * as path from 'path';
 import { ClassInfo, MethodInfo } from './types';
+import * as ts from 'typescript';
 export class NatsScanner {
   static async scanClasses(
     dir: string,
@@ -406,10 +550,10 @@ export class NatsScanner {
   ): Promise<ClassInfo[]> {
     const classInfos: ClassInfo[] = [];
     try {
-      const files = await fs.readdir(dir);
+      const files = await fs.promises.readdir(dir);
       for (const file of files) {
         const filePath = path.join(dir, file);
-        const stat = await fs.stat(filePath);
+        const stat = await fs.promises.stat(filePath);
         if (stat.isDirectory()) {
           const isExcluded = excludeDir.some((excluded) => filePath.includes(excluded));
           if (isExcluded) {
@@ -449,10 +593,19 @@ export class NatsScanner {
     }
     return methods;
   }
+  static getTypeScriptSourceFile(filePath: string): ts.SourceFile | undefined {
+    try {
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      return ts.createSourceFile(filePath, fileContent, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    } catch (e) {
+      return undefined;
+    }
+  }
 }
 
 // src/types.ts
 import { Logger } from 'pino';
+import { Codec as NatsCodec } from 'nats';
 export interface NatsOptions {
   natsUrl: string;
   subjectPattern?: (className: string, methodName: string) => string;
@@ -463,7 +616,7 @@ export interface NatsOptions {
   dlqSubject?: string;
   streaming?: boolean;
   context?: Record<string, any>;
-  codec?: Codec<any>;
+  codec?: NatsCodec<any>;
   logger?: Logger;
 }
 export interface ClassInfo {
@@ -506,6 +659,7 @@ export function generateNatsSubject(
 
 // test/main.example.ts
 import { NatsClient, NatsOptions } from '../src';
+import { PrismaClient } from './prisma-client';
 interface MathRequest {
   a: number;
   b: number;
@@ -513,10 +667,13 @@ interface MathRequest {
 interface MathResponse {
   result: number;
 }
+const prisma = new PrismaClient();
 interface ExposedMethods {
   MathService: {
     add: (data: MathRequest) => Promise<MathResponse>;
     subtract: (data: MathRequest) => Promise<MathResponse>;
+    getUser: () => Promise<any>;
+    getUsers: () => Promise<any[]>;
   };
 }
 async function main() {
@@ -534,7 +691,7 @@ async function main() {
       serviceName: 'math-service',
     },
   };
-  const client = new NatsClient<ExposedMethods>(); // Pass the type here
+  const client = new NatsClient<ExposedMethods>();
   await client.connect(options);
   const exposedMethods = client.getExposedMethods();
   console.log('Exposed method', exposedMethods);
@@ -542,12 +699,240 @@ async function main() {
   console.log('Add result:', addResult);
   const subResult: MathResponse = await exposedMethods.MathService.subtract({ a: 5, b: 3 });
   console.log('Subtract result:', subResult);
+  const user = await exposedMethods.MathService.getUser();
+  console.log('user result:', user);
+  const users = await exposedMethods.MathService.getUsers();
+  console.log('users result:', users);
   await client.publish('math.event', { message: 'calculate' });
   await client.disconnect();
 }
 main().catch((error) => console.error('Error running main:', error));
 
+// test/nats-rpc-speed.test.ts
+import { describe, afterAll, it } from 'bun:test';
+import { NatsClient, NatsOptions } from '../src';
+import { connect, NatsConnection, JSONCodec, StringCodec } from 'nats';
+interface MathRequest {
+  a: number;
+  b: number;
+}
+interface MathResponse {
+  result: number;
+}
+interface Payload<T> {
+  subject: string;
+  data: T;
+}
+class MathService {
+  add(data: MathRequest): MathResponse {
+    return { result: data.a + data.b };
+  }
+  subtract(data: MathRequest): MathResponse {
+    return { result: data.a - data.b };
+  }
+}
+const mathService = new MathService();
+const iterations = 1000;
+const payload: MathRequest = { a: 10, b: 5 };
+async function benchmark(name: string, fn: () => Promise<void>): Promise<{ name: string; time: number }> {
+  const start = performance.now();
+  await fn();
+  const end = performance.now();
+  const time = end - start;
+  console.log(`Scenario "${name}" took: ${time.toFixed(2)}ms`);
+  return { name, time };
+}
+describe('NATS RPC Performance', () => {
+  let results: { name: string; time: number }[] = [];
+  afterAll(() => {
+    results.sort((a, b) => a.time - b.time);
+    console.log('\n--- Benchmark Results ---');
+    console.log('| Scenario                      | Time (ms) |');
+    console.log('|-------------------------------|-----------|');
+    results.forEach((result) => {
+      const name = result.name.padEnd(30); // Pad name to a fixed width for alignment
+      const time = result.time.toFixed(2).padEnd(9);
+      console.log(`| ${name} | ${time} |`);
+    });
+  });
+  it('should compare performance across different scenarios', async () => {
+    results.push(
+      await benchmark('Direct function call', async () => {
+        for (let i = 0; i < iterations; i++) {
+          mathService.add(payload);
+        }
+      }),
+    );
+    const natsOptionsJson: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+    };
+    const clientJson = new NatsClient();
+    await clientJson.connect(natsOptionsJson);
+    const exposedMethodsJson = clientJson.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC JSON codec', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await exposedMethodsJson.MathService.add(payload);
+        }
+      }),
+    );
+    await clientJson.disconnect();
+    const natsOptionsString: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+      codec: StringCodec(),
+    };
+    const clientString = new NatsClient();
+    await clientString.connect(natsOptionsString);
+    const exposedMethodsString = clientString.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC String codec', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await exposedMethodsString.MathService.add(payload);
+        }
+      }),
+    );
+    await clientString.disconnect();
+    let ncJson: NatsConnection | undefined;
+    results.push(
+      await benchmark('NATS JSON no-lib', async () => {
+        ncJson = await connect({ servers: 'nats://localhost:4222' });
+        const jc = JSONCodec();
+        const subject = 'MathService.add';
+        for (let i = 0; i < iterations; i++) {
+          const payloadToNats = jc.encode({ subject, data: payload });
+          const response = await ncJson.request(subject, payloadToNats, { timeout: 3000 });
+          const decoded = jc.decode(response.data) as any;
+        }
+        await ncJson.close();
+      }),
+    );
+    ncJson = undefined;
+    let ncString: NatsConnection | undefined;
+    results.push(
+      await benchmark('NATS String no-lib', async () => {
+        ncString = await connect({ servers: 'nats://localhost:4222' });
+        const sc = StringCodec();
+        const subject = 'MathService.add';
+        for (let i = 0; i < iterations; i++) {
+          const payloadToNats = sc.encode(JSON.stringify({ subject, data: payload }));
+          const response = await ncString.request(subject, payloadToNats, { timeout: 3000 });
+          const decoded = JSON.parse(sc.decode(response.data)) as any;
+        }
+        await ncString.close();
+      }),
+    );
+    ncString = undefined;
+    const complexPayload = { a: 10, b: 5, c: { d: 1, e: [1, 2, 3], f: 'test' } };
+    const natsOptionsComplex: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+    };
+    const clientComplex = new NatsClient();
+    await clientComplex.connect(natsOptionsComplex);
+    const exposedMethodsComplex = clientComplex.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC JSON complex payload', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await exposedMethodsComplex.MathService.add(complexPayload);
+        }
+      }),
+    );
+    await clientComplex.disconnect();
+    const natsOptionsStringComplex: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+      codec: StringCodec(),
+    };
+    const clientStringComplex = new NatsClient();
+    await clientStringComplex.connect(natsOptionsStringComplex);
+    const exposedMethodsStringComplex = clientStringComplex.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC String complex payload', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await exposedMethodsStringComplex.MathService.add(complexPayload);
+        }
+      }),
+    );
+    await clientStringComplex.disconnect();
+    const natsOptionsNoScan: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+    };
+    const clientNoScan = new NatsClient();
+    await clientNoScan.connect(natsOptionsNoScan);
+    results.push(
+      await benchmark('NATS RPC JSON no scan', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await clientNoScan.request('MathService.add', payload);
+        }
+      }),
+    );
+    await clientNoScan.disconnect();
+    const natsOptionsNoScanString: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      codec: StringCodec(),
+    };
+    const clientNoScanString = new NatsClient();
+    await clientNoScanString.connect(natsOptionsNoScanString);
+    results.push(
+      await benchmark('NATS RPC String no scan', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await clientNoScanString.request('MathService.add', payload);
+        }
+      }),
+    );
+    await clientNoScanString.disconnect();
+    const natsOptionsMultiRequest: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+    };
+    const clientMultiRequest = new NatsClient();
+    await clientMultiRequest.connect(natsOptionsMultiRequest);
+    const exposedMethodsMultiRequest = clientMultiRequest.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC JSON multiple request', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await Promise.all([
+            exposedMethodsMultiRequest.MathService.add(payload),
+            exposedMethodsMultiRequest.MathService.add(payload),
+            exposedMethodsMultiRequest.MathService.add(payload),
+            exposedMethodsMultiRequest.MathService.add(payload),
+          ]);
+        }
+      }),
+    );
+    await clientMultiRequest.disconnect();
+    const natsOptionsMultiRequestString: NatsOptions = {
+      natsUrl: 'nats://localhost:4222',
+      scanPath: './test/services',
+      codec: StringCodec(),
+    };
+    const clientMultiRequestString = new NatsClient();
+    await clientMultiRequestString.connect(natsOptionsMultiRequestString);
+    const exposedMethodsMultiRequestString = clientMultiRequestString.getExposedMethods() as any;
+    results.push(
+      await benchmark('NATS RPC String multiple request', async () => {
+        for (let i = 0; i < iterations; i++) {
+          await Promise.all([
+            exposedMethodsMultiRequestString.MathService.add(payload),
+            exposedMethodsMultiRequestString.MathService.add(payload),
+            exposedMethodsMultiRequestString.MathService.add(payload),
+            exposedMethodsMultiRequestString.MathService.add(payload),
+          ]);
+        }
+      }),
+    );
+    await clientMultiRequestString.disconnect();
+  });
+});
+
+// test/prisma-client.ts
+export * from '@prisma/client';
+
 // test/services/math-service.ts
+import { PrismaClient, User } from '../prisma-client';
+const prisma = new PrismaClient();
 export class MathService {
   async add(data: { a: number; b: number }): Promise<{ result: number }> {
     console.log('Processing add request: ', data);
@@ -556,6 +941,12 @@ export class MathService {
   async subtract(data: { a: number; b: number }): Promise<{ result: number }> {
     console.log('Processing subtract request: ', data);
     return { result: data.a - data.b };
+  }
+  async getUser(): Promise<User | null> {
+    return await prisma.user.findFirst();
+  }
+  async getUsers(): Promise<User[]> {
+    return await prisma.user.findMany();
   }
 }
 

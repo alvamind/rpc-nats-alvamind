@@ -9,13 +9,17 @@
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
+  "prisma": {
+    "seed": "bunx ts-node-esm prisma/seed.ts"
+  },
   "scripts": {
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "build": "bun build ./src/index.ts --outdir ./build --target node"
+    "build:type": "bun ./scripts/generate-type.ts",
+    "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node"
   },
   "keywords": [
     "rpc",
