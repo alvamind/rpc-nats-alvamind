@@ -21,6 +21,6 @@ export interface INatsRpc {
   connect(): Promise<void>;
   call<T, R>(methodName: string, data: T): Promise<R>;
   registerController(token: any): Promise<void>;
-  getControllerProxy<T>(controllerName: string): T;
+  getProxy<T>(controllerName: string): T;
   close(): void;
 }

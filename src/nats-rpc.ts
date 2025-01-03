@@ -105,7 +105,7 @@ export class NatsRpc implements INatsRpc {
       this.nc.close();
     }
   }
-  public getControllerProxy<T>(controllerName: string): T {
+  public getProxy<T>(controllerName: string): T {
     const controller = this.controllerProxies.get(controllerName);
     if (!controller) {
       throw new Error(`Controller ${controllerName} not found in registry`);
