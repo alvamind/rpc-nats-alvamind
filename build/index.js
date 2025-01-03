@@ -16939,7 +16939,7 @@ class NatsRpc {
       this.isConnected = true;
       console.log(`[NATS] Connected to ${this.options.natsUrl}`);
       this.nc.closed().then(() => {
-        console.log("[NATS] Connection closed");
+        console.log("[RPC-NATS-LIB] Connection closed");
         this.isConnected = false;
       });
     }
@@ -16953,7 +16953,7 @@ class NatsRpc {
   async register(subject, handler) {
     await this.ensureConnection();
     if (this.handlers.has(subject)) {
-      console.warn(`[NATS] Handler already registered for subject: ${subject}`);
+      console.warn(`[RPC-NATS-LIB] Handler already registered for subject: ${subject}`);
       return;
     }
     this.handlers.set(subject, handler);
@@ -16981,7 +16981,13 @@ class NatsRpc {
     })().catch((err) => console.error(`[NATS] Subscription error:`, err));
   }
   async registerController(token) {
-    const instance = this.options.dependencyResolver.resolve(token);
+    const instanceOrDelayed = this.options.dependencyResolver.resolve(token);
+    let instance;
+    if (typeof instanceOrDelayed === "function") {
+      instance = await this.options.dependencyResolver.resolve(instanceOrDelayed);
+    } else {
+      instance = instanceOrDelayed;
+    }
     if (!instance)
       throw new Error(`Instance not found for token ${String(token)}`);
     const methods = getAllControllerMethods(instance, this.options.subjectPattern ?? ((className, methodName) => `${className}.${methodName}`));
@@ -17002,7 +17008,7 @@ class NatsRpc {
       this.nc.close();
     }
   }
-  getControllerProxy(controllerName) {
+  getProxy(controllerName) {
     const controller = this.controllerProxies.get(controllerName);
     if (!controller) {
       throw new Error(`Controller ${controllerName} not found in registry`);
