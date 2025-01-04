@@ -5,6 +5,13 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
@@ -16,7 +23,7 @@
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.build.json",
     "source": "generate-source output=source.md exclude=dist/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
@@ -37,7 +44,8 @@
     "dist",
     "src",
     "scripts",
-    "README.md"
+    "README.md",
+    "index.d.ts"
   ],
   "author": "Alvamind",
   "license": "MIT",
