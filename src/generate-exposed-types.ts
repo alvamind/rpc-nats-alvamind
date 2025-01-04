@@ -86,19 +86,11 @@ async function extractTypeInformation(scanPath: string, outputPath: string, logg
     methodReturns: new Map(),
     localInterfaces: new Set<string>(),
   };
-
   for (const sourceFile of program.getSourceFiles()) {
     if (!tsFiles.includes(sourceFile.fileName)) continue;
     logger.debug(`[NATS] Processing file: ${sourceFile.fileName}`);
 
     ts.forEachChild(sourceFile, (node) => {
-      // First collect any interfaces defined in the file
-      if (ts.isInterfaceDeclaration(node) && node.name) {
-        const interfaceText = node.getText();
-        typeInfo.localInterfaces.add(interfaceText);
-        logger.debug(`[NATS] Found interface: ${node.name.text}`);
-      }
-
       if (ts.isClassDeclaration(node) && node.name) {
         const className = node.name.text;
         logger.debug(`[NATS] Extracting method info from class: ${className}`);
@@ -109,32 +101,40 @@ async function extractTypeInformation(scanPath: string, outputPath: string, logg
           if (ts.isMethodDeclaration(member) && member.name) {
             const methodName = ts.isIdentifier(member.name) ? member.name.text : member.name.getText();
             logger.debug(`[NATS] Extracting type info for method: ${methodName} in class ${className}`);
-            // Extract parameter type (all parameter)
-            const params: { type: string; name: string; optional: boolean }[] = [];
 
-            for (const param of member.parameters) {
+            // Extract parameter types
+            const params: { type: string; name: string; optional: boolean }[] = [];
+            member.parameters.forEach(param => {
               if (param.type && param.name) {
-                params.push({ type: param.type.getText(), name: param.name.getText(), optional: !!param.questionToken });
-                logger.debug(`[NATS] Parameter type for method ${methodName} is: ${param.type.getText()}`);
+                params.push({
+                  type: param.type.getText(),
+                  name: param.name.getText(),
+                  optional: !!param.questionToken
+                });
                 collectImports(param.type, typeInfo.imports, logger, checker, outputPath, scanPath);
               }
-            }
+            });
             methodParams.set(methodName, params);
 
-            // Extract return type
+            // Extract and process return type
             if (member.type) {
               const returnType = extractReturnType(member.type, checker);
               if (returnType) {
                 methodReturns.set(methodName, returnType);
                 logger.debug(`[NATS] Return type for method ${methodName} is: ${returnType}`);
-                collectImports(member.type, typeInfo.imports, logger, checker, outputPath, scanPath);
-              } else {
-                methodReturns.set(methodName, "any");
-                logger.debug(`[NATS] Return type for method ${methodName} is not promise, set to any`);
+
+                // Process the return type node for imports
+                if (ts.isTypeReferenceNode(member.type)) {
+                  // Handle Promise generic type
+                  if (member.type.typeArguments && member.type.typeArguments.length > 0) {
+                    member.type.typeArguments.forEach(typeArg => {
+                      collectImports(typeArg, typeInfo.imports, logger, checker, outputPath, scanPath);
+                    });
+                  }
+                } else {
+                  collectImports(member.type, typeInfo.imports, logger, checker, outputPath, scanPath);
+                }
               }
-            } else {
-              methodReturns.set(methodName, "any");
-              logger.debug(`[NATS] No return type found for method ${methodName} , set to any`);
             }
           }
         });
@@ -155,96 +155,42 @@ function collectImports(node: ts.Node, imports: Set<string>, logger: Logger, che
       const typeName = symbol;
       logger.debug(`[NATS] Started collecting imports for type: ${typeName}`);
 
-      // Find the symbol and its declarations
+      // Handle Promise and other generic types
+      if (node.typeArguments) {
+        node.typeArguments.forEach(typeArg => {
+          collectImports(typeArg, imports, logger, checker, outputPath, scanPath);
+        });
+      }
+
       if (node.typeName && ts.isIdentifier(node.typeName)) {
-        try {
-          const type = checker.getTypeAtLocation(node.typeName);
-          logger.debug(`[NATS] Got type for ${typeName}:`, {
-            hasType: !!type,
-            hasSymbol: !!(type && type.symbol),
-          });
+        const type = checker.getTypeAtLocation(node.typeName);
+        if (type && type.symbol) {
+          const declarations = type.symbol.getDeclarations();
+          if (declarations && declarations.length > 0) {
+            const declaration = declarations[0];
+            const sourceFile = declaration.getSourceFile();
+            if (sourceFile) {
+              if (sourceFile.fileName.includes("node_modules/typescript/lib") ||
+                ["Promise", "Partial", "Omit", "Pick", "Record", "Exclude", "Extract"].includes(typeName)) {
+                logger.debug(`[NATS] Skipping built-in type ${typeName}`);
+                return;
+              }
 
-          if (type && type.symbol) {
-            const declarations = type.symbol.getDeclarations();
-            logger.debug(`[NATS] Declarations for ${typeName}:`, {
-              hasDeclarations: !!declarations,
-              declarationCount: declarations?.length,
-            });
+              const modulePath = sourceFile.fileName;
+              const relativePath = path.relative(path.dirname(outputPath), modulePath).replace(/\.ts$/, "");
 
-            if (declarations && declarations.length > 0) {
-              const declaration = declarations[0];
-              const sourceFile = declaration.getSourceFile();
-              logger.debug(`[NATS] Source file for ${typeName}:`, {
-                fileName: sourceFile?.fileName,
-                exists: !!sourceFile,
-              });
-
-              if (sourceFile) {
-                // Skip TypeScript built-in types
-                if (sourceFile.fileName.includes("node_modules/typescript/lib")) {
-                  logger.debug(`[NATS] Skipping built-in type ${typeName} from ${sourceFile.fileName}`);
-                  return;
-                }
-
-                // Skip utility types
-                if (["Partial", "Omit", "Pick", "Record", "Exclude", "Extract"].includes(typeName)) {
-                  logger.debug(`[NATS] Skipping utility type ${typeName}`);
-                  return;
-                }
-
-                // Handle imports from any source file
-                const modulePath = sourceFile.fileName;
-                const relativePath = path.relative(path.dirname(outputPath), modulePath).replace(/\.ts$/, "");
-
-                logger.debug(`[NATS] Import path resolution for ${typeName}:`, {
-                  originalPath: modulePath,
-                  outputPath: outputPath,
-                  relativePath: relativePath
-                });
-
-                // Check if the type is already imported
-                const isAlreadyImported = Array.from(imports).some(imp => imp.includes(`{ ${typeName} }`));
-                logger.debug(`[NATS] Import status for ${typeName}:`, {
-                  isAlreadyImported,
-                  currentImports: Array.from(imports)
-                });
-
-                if (!isAlreadyImported) {
-                  const importStatement = `import { ${typeName} } from '${relativePath}';`;
-                  logger.debug(`[NATS] Adding import statement: ${importStatement}`);
-                  imports.add(importStatement);
-                }
+              if (!Array.from(imports).some(imp => imp.includes(`{ ${typeName} }`))) {
+                logger.debug(`[NATS] Adding import for type: ${typeName}`);
+                imports.add(`import { ${typeName} } from '${relativePath}';`);
               }
             }
-          } else {
-            logger.debug(`[NATS] No type or symbol found for ${typeName}`);
           }
-        } catch (error) {
-          logger.error(`[NATS] Error processing type ${typeName}:`, error);
         }
       }
     }
   }
 
-  // Process type arguments for generic types
-  if (ts.isTypeReferenceNode(node) && node.typeArguments) {
-    logger.debug(`[NATS] Processing generic type arguments:`, {
-      count: node.typeArguments.length
-    });
-    node.typeArguments.forEach((typeArg, index) => {
-      logger.debug(`[NATS] Processing type argument ${index + 1}/${node.typeArguments!.length}`);
-      collectImports(typeArg, imports, logger, checker, outputPath, scanPath);
-    });
-  }
-
-  // Log node kind for debugging
-  logger.debug(`[NATS] Node kind: ${ts.SyntaxKind[node.kind]}`);
-
-  // Recursively process child nodes
-  ts.forEachChild(node, (child: ts.Node) => {
-    logger.debug(`[NATS] Processing child node`);
-    collectImports(child, imports, logger, checker, outputPath, scanPath);
-  });
+  ts.forEachChild(node, child => collectImports(child, imports, logger, checker, outputPath, scanPath));
 }
 
 function extractReturnType(node: ts.TypeNode, checker: ts.TypeChecker): string | null {
