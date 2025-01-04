@@ -5,42 +5,6 @@ src
 test
 test/services
 ====================
-// .gitignore
-# Node Modules
-node_modules/
-# Build Output
-build/
-dist/
-coverage/
-# Temporary Files and Folders
-.bun/
-.turbo/
-.eslintcache/
-.parcel-cache/
-.next/
-.cache/
-.DS_Store
-*.log
-*.lock
-*.sqlite
-# IDE Files
-.idea/
-.vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-# System Files
-__pycache__/
-.env
-# OS or Editor
-*.swp
-*.swo
-*~
-# Test Files
-test/coverage/
-test/*.snap
-
 // package.json
 {
   "name": "rpc-nats-alvamind",
@@ -60,10 +24,11 @@ test/*.snap
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
-    "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts",
+    "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "build:type": "bun ./scripts/generate-type.ts",
+    "build:type": "tsc --emitDeclarationOnly",
     "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node",
+    "build:tgz": "bun run build && bun pm pack",
     "postinstall": "node ./scripts/postinstall.js"
   },
   "bin": {
@@ -97,7 +62,7 @@ test/*.snap
 
 // scripts/generate-type-cli.ts
 #!/usr/bin/env bun
-import { generateTypeCli } from '../build/src';
+import { generateTypeCli } from 'rpc-nats-alvamind';
 const args = process.argv.slice(2);
 const scanPath = args[1];
 const outputPath = args[2];
@@ -145,6 +110,7 @@ export async function generateExposedMethodsType(options: Omit<NatsOptions, 'nat
     await registry.generateExposedMethodsType(outputPath);
   } catch (error) {
     logger.error(`[NATS] Error generating exposed methods types`, error);
+    console.error(error)
   }
 }
 export async function generateTypeCli(scanPath: string, outputPath: string = 'src/generated/exposed-methods.d.ts') {
@@ -157,6 +123,7 @@ export async function generateTypeCli(scanPath: string, outputPath: string = 'sr
 }
 
 // src/index.ts
+import 'reflect-metadata';
 export { NatsClient } from './nats-client';
 export { NatsRegistry } from './nats-registry';
 export { NatsScanner } from './nats-scanner';
@@ -355,13 +322,13 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     this.options = options;
     this.logger = logger;
     this.sc = this.options.codec ?? JSONCodec();
-    console.log("tes");
+    logger.info(`[NATS] version 2`);
   }
   async registerHandlers(path: string) {
     this.logger.info(`[NATS] Registering handlers in ${path}`);
     const classes = await NatsScanner.scanClasses(path);
     if (classes.length === 0) {
-      this.logger.warn(`[NATS] 123 No exported class found in ${path}.`);
+      this.logger.warn(`[NATS] No exported class found in ${path}.`);
     }
     this.classInfos = classes;
     for (const classInfo of classes) {

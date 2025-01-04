@@ -24,13 +24,13 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     this.options = options;
     this.logger = logger;
     this.sc = this.options.codec ?? JSONCodec();
-    logger.info(`[NATS] version 1`);
+    logger.info(`[NATS] version 2`);
   }
   async registerHandlers(path: string) {
     this.logger.info(`[NATS] Registering handlers in ${path}`);
     const classes = await NatsScanner.scanClasses(path);
     if (classes.length === 0) {
-      this.logger.warn(`[NATS] 123 No exported class found in ${path}.`);
+      this.logger.warn(`[NATS] No exported class found in ${path}.`);
     }
     this.classInfos = classes;
     for (const classInfo of classes) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { generateTypeCli } from 'rpc-nats-alvamind';
+import { generateTypeCli } from '../src/generate-exposed-types';
 const args = process.argv.slice(2);
 const scanPath = args[1];
 const outputPath = args[2];
