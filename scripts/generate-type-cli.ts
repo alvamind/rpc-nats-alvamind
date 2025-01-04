@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 import 'reflect-metadata';
-
-import { generateTypeCli } from '../src/generate-exposed-types';
+import { generateTypeCli } from 'method-types-ts-generator-alvamind';
 const args = process.argv.slice(2);
 const scanPath = args[1];
 const outputPath = args[2];

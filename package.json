@@ -1,6 +1,6 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.0",
+  "version": "1.0.9",
   "description": "A flexible RPC library using NATS",
   "type": "module",
   "main": "dist/index.js",
@@ -24,6 +24,7 @@
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
+    "reinstall": "clean && bun install",
     "build": "tsc && tsc -p tsconfig.build.json",
     "source": "generate-source output=source.md exclude=dist/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
     "clean": "rimraf dist",
@@ -51,16 +52,18 @@
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
-    "alvamind-tools": "^1.0.2",
+    "alvamind-tools": "^1.0.3",
     "nats": "^2.28.2",
-    "pino": "^8.21.0",
+    "pino": "^9.6.0",
     "reflect-metadata": "^0.2.2",
-    "chalk": "^4.1.2"
+    "chalk": "^5.4.1",
+    "method-types-ts-generator-alvamind": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.11",
     "bun-types": "^1.1.42",
-    "rimraf": "^5.0.0",
-    "typescript": "^5.7.2"
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "method-types-ts-generator-alvamind": "^1.0.0"
   }
 }
