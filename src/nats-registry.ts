@@ -1,14 +1,12 @@
-import 'reflect-metadata';
+// src/nats-registry.ts
+import "reflect-metadata";
+import { NatsConnection, Codec, JSONCodec } from "nats";
+import { NatsOptions, ClassInfo, Payload, ErrorObject, MethodInfo } from "./types";
+import { NatsScanner } from "./nats-scanner";
+import { generateNatsSubject } from "./utils";
+import { Logger } from "pino";
+import { ImportDeclaration, SourceFile, SyntaxKind } from "typescript";
 
-import { NatsConnection, Codec, JSONCodec } from 'nats';
-import { NatsOptions, ClassInfo, Payload, ErrorObject, MethodInfo } from './types';
-import { NatsScanner } from './nats-scanner';
-import { generateNatsSubject } from './utils';
-import { Logger } from 'pino';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { ImportDeclaration, SourceFile, SyntaxKind } from 'typescript';
-import * as fss from 'fs';
 export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private handlers = new Map<string, Function>();
   private wildcardHandlers = new Map<string, Function>();
@@ -26,7 +24,6 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     this.options = options;
     this.logger = logger;
     this.sc = this.options.codec ?? JSONCodec();
-    logger.info(`[NATS] version 2`);
   }
   async registerHandlers(path: string) {
     this.logger.info(`[NATS] Registering handlers in ${path}`);
@@ -41,127 +38,20 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       const controller = (this.exposedMethods as any)[classInfo.className];
       for (const methodInfo of classInfo.methods) {
         this.methodCount++;
-        const subject = generateNatsSubject(
-          classInfo.className,
-          methodInfo.methodName,
-          this.options.subjectPattern ?? ((className: string, methodName: string) => `${className}.${methodName}`),
-        );
-        //Check if nats connection is available before register handler
+        const subject = generateNatsSubject(classInfo.className, methodInfo.methodName, this.options.subjectPattern ?? ((className: string, methodName: string) => `${className}.${methodName}`));
         if (this.natsConnection) {
           this.registerHandler(subject, methodInfo.func);
         }
-
-        (controller as Record<string, any>)[methodInfo.methodName] = async <T>(data: any) =>
-          await this.callHandler<T>(subject, data);
+        (controller as Record<string, any>)[methodInfo.methodName] = async <T>(data: any) => await this.callHandler<T>(subject, data);
       }
     }
-    this.logger.info(
-      `[NATS] Finished registering handlers in ${path}. Total class: ${this.classCount}  Total methods: ${this.methodCount}`,
-    );
+    this.logger.info(`[NATS] Finished registering handlers in ${path}. Total class: ${this.classCount}  Total methods: ${this.methodCount}`);
   }
-  async generateExposedMethodsType(outputPath: string = 'src/generated/exposed-methods.d.ts') {
-    const interfaceString = this.generateInterfaceString();
-    await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    await fs.writeFile(outputPath, interfaceString, 'utf-8');
-    this.logger.info(`[NATS] Exposed method type generate successfully to ${outputPath}`);
+  getClassInfos() {
+    return this.classInfos;
   }
-  private generateInterfaceString() {
-    let interfaceString = '\n\n';
-    interfaceString += 'export interface ExposedMethods {\n';
-    for (const classInfo of this.classInfos) {
-      interfaceString += `  ${classInfo.className}: {\n`;
-      for (const methodInfo of classInfo.methods) {
-        const paramType = this.getMethodParamType(methodInfo);
-        const returnType = this.getMethodReturnType(methodInfo);
-        interfaceString += `    ${methodInfo.methodName}: <T extends ${returnType}>(data: ${paramType}) => Promise<T>;\n`;
-      }
-      interfaceString += `  };\n`;
-    }
-    interfaceString += '}\n';
-    if (Object.keys(this.typeAlias).length > 0) {
-      interfaceString += '\n';
-      for (const [name, value] of Object.entries(this.typeAlias)) {
-        interfaceString = `${value}\n${interfaceString}`;
-      }
-    }
-    return interfaceString;
-  }
-  private getMethodReturnType(methodInfo: MethodInfo): string {
-    const returnType = (Reflect as any).getMetadata('design:returntype', methodInfo.func);
-    if (!returnType) {
-      return 'any';
-    }
-    const typeName = returnType.name;
-    if (typeName === 'Promise') {
-      const promiseType = (Reflect as any).getMetadata('design:returntype', methodInfo.func)?.arguments?.[0];
-      if (!promiseType) {
-        return 'any';
-      }
-      return this.resolveTypeName(promiseType);
-    }
-    return this.resolveTypeName(returnType);
-  }
-  private getMethodParamType(methodInfo: MethodInfo): string {
-    const paramTypes = (Reflect as any).getMetadata('design:paramtypes', methodInfo.func) as any[];
-    if (!paramTypes || paramTypes.length === 0) {
-      return 'any';
-    }
-    return this.resolveTypeName(paramTypes[0]);
-  }
-  private resolveTypeName(target: any): string {
-    if (!target) {
-      return 'any';
-    }
-    const name = target.name;
-    if (name === 'Object') {
-      return 'any';
-    }
-    if (name === 'String' || name === 'Number' || name === 'Boolean') {
-      return name.toLowerCase();
-    }
-    if (name === 'Array') {
-      return 'any[]';
-    }
-    if (name === 'Date') {
-      return 'Date';
-    }
-    try {
-      const importInfo = this.findImportStatement(target);
-      if (importInfo) {
-        this.typeAlias[name] = importInfo;
-        return name;
-      }
-    } catch (error) { }
-    return 'any';
-  }
-  private findImportStatement(target: any): string | undefined {
-    const filePath = target.__proto__.constructor.name;
-    if (!filePath) {
-      return undefined;
-    }
-    const modulePath = path.resolve(filePath);
-    if (fss.existsSync(modulePath)) {
-      const sourceFile = NatsScanner.getTypeScriptSourceFile(modulePath);
-      if (!sourceFile) return;
-      const imports = sourceFile.statements.filter(
-        (statement): statement is ImportDeclaration => statement.kind === SyntaxKind.ImportDeclaration,
-      );
-      for (const importDeclaration of imports) {
-        const namedBindings = importDeclaration.importClause?.namedBindings;
-        if (namedBindings && namedBindings.kind === SyntaxKind.NamedImports) {
-          for (const importSpecifier of namedBindings.elements) {
-            if (importSpecifier.name.text === target.name) {
-              const module = (importDeclaration.moduleSpecifier as any).text;
-              return `import {${target.name}} from '${module}';`;
-            }
-          }
-        } else if (importDeclaration.importClause?.name?.text === target.name) {
-          const module = (importDeclaration.moduleSpecifier as any).text;
-          return `import ${target.name} from '${module}';`;
-        }
-      }
-    }
-    return undefined;
+  getTypeAlias() {
+    return this.typeAlias;
   }
   protected async registerHandler(subject: string, handler: Function) {
     if (!this.natsConnection) {
@@ -172,14 +62,14 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       return;
     }
     this.handlers.set(subject, handler);
-    if (subject.includes('*')) {
+    if (subject.includes("*")) {
       this.wildcardHandlers.set(subject, handler);
     }
     const subscription = this.natsConnection.subscribe(subject, {
       callback: async (err, msg) => {
         if (err) {
           this.logger.error(`[NATS] Subscription error for ${subject}`, err);
-          return
+          return;
         }
         try {
           const decodedData = this.sc.decode(msg.data);
@@ -189,7 +79,7 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
           msg.respond(response);
         } catch (error: any) {
           const errorObject: ErrorObject = {
-            code: 'HANDLER_ERROR',
+            code: "HANDLER_ERROR",
             message: `Error processing message for ${subject}`,
             details: error,
           };
@@ -210,7 +100,7 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     }
   }
   protected async callHandler<T>(subject: string, data: any): Promise<T> {
-    if (!this.natsConnection) throw new Error('Nats connection is not established yet.');
+    if (!this.natsConnection) throw new Error("Nats connection is not established yet.");
     const payload: Payload<any> = {
       subject,
       data,
@@ -243,7 +133,7 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   }
   protected findWildcardHandler(subject: string) {
     for (const [key, handler] of this.wildcardHandlers) {
-      const regex = new RegExp(`^${key.replace(/\*/g, '[^.]*')}$`);
+      const regex = new RegExp(`^${key.replace(/\*/g, "[^.]*")}$`);
       if (regex.test(subject)) {
         return handler;
       }
