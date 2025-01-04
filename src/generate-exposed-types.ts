@@ -20,7 +20,7 @@ interface ClassInfo {
 }
 
 export async function generateExposedMethodsType(options: { scanPath: string }, outputPath: string = "src/generated/exposed-methods.d.ts", logger: Logger = pino({ level: "debug" })) {
-  logger.info(`[NATS] generator version 22`);
+  // logger.info(`[NATS] generator version 22`);
   if (!options.scanPath) {
     logger.error(`[NATS] scanPath is required`);
     return;
@@ -42,7 +42,7 @@ export async function generateExposedMethodsType(options: { scanPath: string }, 
 }
 
 async function scanClasses(scanPath: string, logger: Logger): Promise<ClassInfo[]> {
-  logger.debug(`[NATS] Scanning classes in ${scanPath}`);
+  //  logger.debug(`[NATS] Scanning classes in ${scanPath}`);
   const scanPathDir = path.resolve(scanPath);
   const files = await fs.readdir(scanPathDir);
   const tsFiles = files.filter((file) => file.endsWith(".ts")).map((file) => path.join(scanPathDir, file));
@@ -52,11 +52,11 @@ async function scanClasses(scanPath: string, logger: Logger): Promise<ClassInfo[
   const classInfos: ClassInfo[] = [];
   for (const sourceFile of program.getSourceFiles()) {
     if (!tsFiles.includes(sourceFile.fileName)) continue;
-    logger.debug(`[NATS] Processing file: ${sourceFile.fileName}`);
+    // logger.debug(`[NATS] Processing file: ${sourceFile.fileName}`);
     ts.forEachChild(sourceFile, (node) => {
       if (ts.isClassDeclaration(node) && node.name) {
         const className = node.name.text;
-        logger.debug(`[NATS] Found class: ${className}`);
+        // logger.debug(`[NATS] Found class: ${className}`);
         const methods: MethodInfo[] = [];
         node.members.forEach((member) => {
           if (ts.isMethodDeclaration(member) && member.name) {
@@ -69,12 +69,12 @@ async function scanClasses(scanPath: string, logger: Logger): Promise<ClassInfo[
       }
     });
   }
-  logger.debug(`[NATS] Finished scanning classes. Total class: ${classInfos.length}`);
+  // logger.debug(`[NATS] Finished scanning classes. Total class: ${classInfos.length}`);
   return classInfos;
 }
 
 async function extractTypeInformation(scanPath: string, outputPath: string, logger: Logger): Promise<TypeInformation> {
-  logger.debug(`[NATS] Extracting type information in: ${scanPath}`);
+  // logger.debug(`[NATS] Extracting type information in: ${scanPath}`);
   const scanPathDir = path.resolve(scanPath);
   const files = await fs.readdir(scanPathDir);
   const tsFiles = files.filter((file) => file.endsWith(".ts")).map((file) => path.join(scanPathDir, file));
@@ -88,19 +88,19 @@ async function extractTypeInformation(scanPath: string, outputPath: string, logg
   };
   for (const sourceFile of program.getSourceFiles()) {
     if (!tsFiles.includes(sourceFile.fileName)) continue;
-    logger.debug(`[NATS] Processing file: ${sourceFile.fileName}`);
+    // logger.debug(`[NATS] Processing file: ${sourceFile.fileName}`);
 
     ts.forEachChild(sourceFile, (node) => {
       if (ts.isClassDeclaration(node) && node.name) {
         const className = node.name.text;
-        logger.debug(`[NATS] Extracting method info from class: ${className}`);
+        // logger.debug(`[NATS] Extracting method info from class: ${className}`);
         const methodParams = new Map<string, { type: string; name: string; optional: boolean }[]>();
         const methodReturns = new Map<string, string>();
 
         node.members.forEach((member) => {
           if (ts.isMethodDeclaration(member) && member.name) {
             const methodName = ts.isIdentifier(member.name) ? member.name.text : member.name.getText();
-            logger.debug(`[NATS] Extracting type info for method: ${methodName} in class ${className}`);
+            // logger.debug(`[NATS] Extracting type info for method: ${methodName} in class ${className}`);
 
             // Extract parameter types
             const params: { type: string; name: string; optional: boolean }[] = [];
@@ -121,7 +121,7 @@ async function extractTypeInformation(scanPath: string, outputPath: string, logg
               const returnType = extractReturnType(member.type, checker);
               if (returnType) {
                 methodReturns.set(methodName, returnType);
-                logger.debug(`[NATS] Return type for method ${methodName} is: ${returnType}`);
+                // logger.debug(`[NATS] Return type for method ${methodName} is: ${returnType}`);
 
                 // Process the return type node for imports
                 if (ts.isTypeReferenceNode(member.type)) {
@@ -153,7 +153,7 @@ function collectImports(node: ts.Node, imports: Set<string>, logger: Logger, che
     const symbol = node.typeName && ts.isIdentifier(node.typeName) ? node.typeName.text : undefined;
     if (symbol) {
       const typeName = symbol;
-      logger.debug(`[NATS] Started collecting imports for type: ${typeName}`);
+      // logger.debug(`[NATS] Started collecting imports for type: ${typeName}`);
 
       // Handle Promise and other generic types
       if (node.typeArguments) {
@@ -172,7 +172,7 @@ function collectImports(node: ts.Node, imports: Set<string>, logger: Logger, che
             if (sourceFile) {
               if (sourceFile.fileName.includes("node_modules/typescript/lib") ||
                 ["Promise", "Partial", "Omit", "Pick", "Record", "Exclude", "Extract"].includes(typeName)) {
-                logger.debug(`[NATS] Skipping built-in type ${typeName}`);
+                // logger.debug(`[NATS] Skipping built-in type ${typeName}`);
                 return;
               }
 
@@ -180,7 +180,7 @@ function collectImports(node: ts.Node, imports: Set<string>, logger: Logger, che
               const relativePath = path.relative(path.dirname(outputPath), modulePath).replace(/\.ts$/, "");
 
               if (!Array.from(imports).some(imp => imp.includes(`{ ${typeName} }`))) {
-                logger.debug(`[NATS] Adding import for type: ${typeName}`);
+                // logger.debug(`[NATS] Adding import for type: ${typeName}`);
                 imports.add(`import { ${typeName} } from '${relativePath}';`);
               }
             }
