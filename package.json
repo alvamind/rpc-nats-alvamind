@@ -19,7 +19,12 @@
     "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
     "build:type": "bun ./scripts/generate-type.ts",
-    "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node"
+    "build:lib": "bun install && bun build ./src/index.ts --outdir ./build --target node && bun pm pack",
+    "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node",
+    "postinstall": "node ./scripts/postinstall.js"
+  },
+  "bin": {
+    "rpc-nats-alvamind": "./scripts/generate-type-cli.ts"
   },
   "keywords": [
     "rpc",
@@ -28,7 +33,8 @@
     "typescript"
   ],
   "files": [
-    "build"
+    "build",
+    "scripts"
   ],
   "author": "Alvamind",
   "license": "MIT",
@@ -36,7 +42,8 @@
     "alvamind-tools": "^1.0.2",
     "nats": "^2.28.2",
     "pino": "^8.21.0",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "chalk": "^4.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.17.11",

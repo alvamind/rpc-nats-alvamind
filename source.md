@@ -1,17 +1,10 @@
 # Project: rpc-nats-alvamind
 
-prisma
+scripts
 src
 test
 test/services
 ====================
-// .env
-# Environment variables declared in this file are automatically made available to Prisma.
-# See the documentation for more detail: https://pris.ly/d/prisma-schema#accessing-environment-variables-from-the-schema
-# Prisma supports the native connection string format for PostgreSQL, MySQL, SQLite, SQL Server, MongoDB and CockroachDB.
-# See the documentation for all the connection string options: https://pris.ly/d/connection-strings
-DATABASE_URL="file:./dev.db"
-
 // .gitignore
 # Node Modules
 node_modules/
@@ -61,7 +54,7 @@ test/*.snap
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
   "prisma": {
-      "seed": "bunx ts-node --esm --loader ts-node/esm prisma/seed.ts"
+    "seed": "bunx ts-node-esm prisma/seed.ts"
   },
   "scripts": {
     "dev": "bun run src/index.ts --watch",
@@ -69,7 +62,12 @@ test/*.snap
     "commit": "commit",
     "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts",
     "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "build": "bun build ./src/index.ts --outdir ./build --target node"
+    "build:type": "bun ./scripts/generate-type.ts",
+    "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node",
+    "postinstall": "node ./scripts/postinstall.js"
+  },
+  "bin": {
+    "rpc-nats-alvamind": "./scripts/generate-type-cli.ts"
   },
   "keywords": [
     "rpc",
@@ -78,52 +76,92 @@ test/*.snap
     "typescript"
   ],
   "files": [
-    "build"
+    "build",
+    "scripts"
   ],
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
-    "@prisma/client": "6.1.0",
     "alvamind-tools": "^1.0.2",
     "nats": "^2.28.2",
     "pino": "^8.21.0",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "chalk": "^4.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.17.11",
     "bun-types": "^1.1.42",
-    "prisma": "^6.1.0",
-    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
 }
 
-// prisma/seed.ts
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
-async function main() {
-  await prisma.user.create({
-    data: {
-      email: 'test@email.com',
-      name: 'test',
-    },
-  });
+// scripts/generate-type-cli.ts
+#!/usr/bin/env bun
+import { generateTypeCli } from '../build/src';
+const args = process.argv.slice(2);
+const scanPath = args[1];
+const outputPath = args[2];
+if (args[0] !== 'generate') {
+  console.error('Invalid command, usage: rpc-nats-alvamind generate <scanPath> <outputPath>')
+  process.exit(1)
 }
-main()
-  .then(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (e) => {
-    console.error(e);
-    await prisma.$disconnect();
-    process.exit(1);
-  });
+if (!scanPath) {
+  console.error('scanPath is required')
+  process.exit(1)
+}
+generateTypeCli(scanPath, outputPath).then(() => {
+  console.log('Type generate successfully')
+}).catch((error: any) => {
+  console.error(error)
+});
+
+// scripts/postinstall.js
+#!/usr/bin/env node
+const chalk = require('chalk');
+console.log(chalk.green('🎉 rpc-nats-alvamind installed!'));
+console.log(chalk.yellow('To generate types for your services:'));
+console.log(chalk.cyan('  1. Navigate to your project directory.'));
+console.log(chalk.cyan('  2. Run: ') + chalk.bold('rpc-nats-alvamind generate <scanPath> <outputPath>'));
+console.log(
+  chalk.yellow('  Example: ') +
+    chalk.bold('rpc-nats-alvamind generate ./src/services ./src/generated/exposed-methods.d.ts'),
+);
+console.log(chalk.yellow('Remember to replace the example scan path and output path with your own.'));
+
+// src/generate-exposed-types.ts
+import { NatsRegistry } from './nats-registry';
+import { NatsOptions } from './types';
+import { Logger, pino } from 'pino';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+export async function generateExposedMethodsType(options: Omit<NatsOptions, 'natsUrl'>, outputPath: string = 'src/generated/exposed-methods.d.ts', logger: Logger = pino()) {
+  if (!options.scanPath) {
+    logger.error(`[NATS] scanPath is required`)
+    return
+  }
+  const registry = new NatsRegistry(undefined as any, options as NatsOptions, logger);
+  try {
+    await registry.registerHandlers(options.scanPath);
+    await registry.generateExposedMethodsType(outputPath);
+  } catch (error) {
+    logger.error(`[NATS] Error generating exposed methods types`, error);
+  }
+}
+export async function generateTypeCli(scanPath: string, outputPath: string = 'src/generated/exposed-methods.d.ts') {
+  const logger = pino()
+  const natsOptions: Omit<NatsOptions, 'natsUrl'> = {
+    scanPath,
+    logger
+  }
+  await generateExposedMethodsType(natsOptions, outputPath, logger);
+}
 
 // src/index.ts
 export { NatsClient } from './nats-client';
 export { NatsRegistry } from './nats-registry';
 export { NatsScanner } from './nats-scanner';
 export type { NatsOptions, ClassInfo, MethodInfo, Payload, RetryConfig, Codec, ErrorObject } from './types';
+export { generateExposedMethodsType, generateTypeCli } from './generate-exposed-types';
 
 // src/nats-client.ts
 import { connect, NatsConnection, Codec, JSONCodec, StringCodec } from 'nats';
@@ -303,7 +341,7 @@ import * as fss from 'fs';
 export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private handlers = new Map<string, Function>();
   private wildcardHandlers = new Map<string, Function>();
-  private natsConnection: NatsConnection;
+  private natsConnection?: NatsConnection;
   private options: NatsOptions;
   private exposedMethods: Partial<T> = {};
   private logger: Logger;
@@ -312,17 +350,18 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
   private methodCount = 0;
   private classInfos: ClassInfo[] = [];
   private typeAlias: Record<string, string> = {};
-  constructor(natsConnection: NatsConnection, options: NatsOptions, logger: Logger) {
+  constructor(natsConnection: NatsConnection | undefined, options: NatsOptions, logger: Logger) {
     this.natsConnection = natsConnection;
     this.options = options;
     this.logger = logger;
     this.sc = this.options.codec ?? JSONCodec();
+    console.log("tes");
   }
   async registerHandlers(path: string) {
     this.logger.info(`[NATS] Registering handlers in ${path}`);
     const classes = await NatsScanner.scanClasses(path);
     if (classes.length === 0) {
-      this.logger.warn(`[NATS] No exported class found in ${path}.`);
+      this.logger.warn(`[NATS] 123 No exported class found in ${path}.`);
     }
     this.classInfos = classes;
     for (const classInfo of classes) {
@@ -336,7 +375,9 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
           methodInfo.methodName,
           this.options.subjectPattern ?? ((className: string, methodName: string) => `${className}.${methodName}`),
         );
-        this.registerHandler(subject, methodInfo.func);
+        if (this.natsConnection) {
+          this.registerHandler(subject, methodInfo.func);
+        }
         (controller as Record<string, any>)[methodInfo.methodName] = async <T>(data: any) =>
           await this.callHandler<T>(subject, data);
       }
@@ -417,7 +458,7 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
         this.typeAlias[name] = importInfo;
         return name;
       }
-    } catch (error) {}
+    } catch (error) { }
     return 'any';
   }
   private findImportStatement(target: any): string | undefined {
@@ -450,6 +491,9 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
     return undefined;
   }
   protected async registerHandler(subject: string, handler: Function) {
+    if (!this.natsConnection) {
+      return;
+    }
     if (this.handlers.has(subject)) {
       this.logger.warn(`[RPC-NATS-LIB] Handler already registered for subject: ${subject}`);
       return;
@@ -462,28 +506,28 @@ export class NatsRegistry<T extends Record<string, any> = Record<string, any>> {
       callback: async (err, msg) => {
         if (err) {
           this.logger.error(`[NATS] Subscription error for ${subject}`, err);
-        } else {
-          try {
-            const decodedData = this.sc.decode(msg.data);
-            const payload: Payload<any> = decodedData as Payload<any>;
-            const result = await handler(payload.data);
-            const response = this.sc.encode(result);
-            msg.respond(response);
-          } catch (error: any) {
-            const errorObject: ErrorObject = {
-              code: 'HANDLER_ERROR',
-              message: `Error processing message for ${subject}`,
-              details: error,
-            };
-            this.logger.error(errorObject.message, error);
-            if (this.options.errorHandler) {
-              this.options.errorHandler(errorObject, subject);
-              const errorResponse = this.sc.encode(errorObject);
-              msg.respond(errorResponse);
-            } else {
-              const errorResponse = this.sc.encode(errorObject);
-              msg.respond(errorResponse);
-            }
+          return
+        }
+        try {
+          const decodedData = this.sc.decode(msg.data);
+          const payload: Payload<any> = decodedData as Payload<any>;
+          const result = await handler(payload.data);
+          const response = this.sc.encode(result);
+          msg.respond(response);
+        } catch (error: any) {
+          const errorObject: ErrorObject = {
+            code: 'HANDLER_ERROR',
+            message: `Error processing message for ${subject}`,
+            details: error,
+          };
+          this.logger.error(errorObject.message, error);
+          if (this.options.errorHandler) {
+            this.options.errorHandler(errorObject, subject);
+            const errorResponse = this.sc.encode(errorObject);
+            msg.respond(errorResponse);
+          } else {
+            const errorResponse = this.sc.encode(errorObject);
+            msg.respond(errorResponse);
           }
         }
       },
@@ -659,7 +703,16 @@ export function generateNatsSubject(
 
 // test/main.example.ts
 import { NatsClient, NatsOptions } from '../src';
-import { PrismaClient } from './prisma-client';
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
 interface MathRequest {
   a: number;
   b: number;
@@ -667,13 +720,12 @@ interface MathRequest {
 interface MathResponse {
   result: number;
 }
-const prisma = new PrismaClient();
 interface ExposedMethods {
   MathService: {
-    add: (data: MathRequest) => Promise<MathResponse>;
-    subtract: (data: MathRequest) => Promise<MathResponse>;
-    getUser: () => Promise<any>;
-    getUsers: () => Promise<any[]>;
+    add: <T extends MathResponse>(data: MathRequest) => Promise<T>;
+    subtract: <T extends MathResponse>(data: MathRequest) => Promise<T>;
+    getUser: <T extends User>(id: number) => Promise<T>;
+    getProduct: <T extends Product>(id: number) => Promise<T>;
   };
 }
 async function main() {
@@ -691,7 +743,7 @@ async function main() {
       serviceName: 'math-service',
     },
   };
-  const client = new NatsClient<ExposedMethods>();
+  const client = new NatsClient<ExposedMethods>(); // Pass the type here
   await client.connect(options);
   const exposedMethods = client.getExposedMethods();
   console.log('Exposed method', exposedMethods);
@@ -699,10 +751,10 @@ async function main() {
   console.log('Add result:', addResult);
   const subResult: MathResponse = await exposedMethods.MathService.subtract({ a: 5, b: 3 });
   console.log('Subtract result:', subResult);
-  const user = await exposedMethods.MathService.getUser();
-  console.log('user result:', user);
-  const users = await exposedMethods.MathService.getUsers();
-  console.log('users result:', users);
+  const userResult: User = await exposedMethods.MathService.getUser(1);
+  console.log('User Result:', userResult);
+  const productResult: Product = await exposedMethods.MathService.getProduct(1);
+  console.log('Product Result:', productResult);
   await client.publish('math.event', { message: 'calculate' });
   await client.disconnect();
 }
@@ -927,12 +979,17 @@ describe('NATS RPC Performance', () => {
   });
 });
 
-// test/prisma-client.ts
-export * from '@prisma/client';
-
 // test/services/math-service.ts
-import { PrismaClient, User } from '../prisma-client';
-const prisma = new PrismaClient();
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
 export class MathService {
   async add(data: { a: number; b: number }): Promise<{ result: number }> {
     console.log('Processing add request: ', data);
@@ -942,11 +999,21 @@ export class MathService {
     console.log('Processing subtract request: ', data);
     return { result: data.a - data.b };
   }
-  async getUser(): Promise<User | null> {
-    return await prisma.user.findFirst();
+  async getUser(id: number): Promise<User> {
+    console.log('Processing get user request: ', id);
+    return {
+      id,
+      name: 'John Doe',
+      email: 'john.doe@example.com',
+    };
   }
-  async getUsers(): Promise<User[]> {
-    return await prisma.user.findMany();
+  async getProduct(id: number): Promise<Product> {
+    console.log('Processing get product request: ', id);
+    return {
+      id,
+      name: 'Laptop',
+      price: 1200,
+    };
   }
 }
 
