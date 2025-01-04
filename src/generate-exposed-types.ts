@@ -153,41 +153,98 @@ function collectImports(node: ts.Node, imports: Set<string>, logger: Logger, che
     const symbol = node.typeName && ts.isIdentifier(node.typeName) ? node.typeName.text : undefined;
     if (symbol) {
       const typeName = symbol;
-      logger.debug(`[NATS] Collecting imports for type: ${typeName}`);
+      logger.debug(`[NATS] Started collecting imports for type: ${typeName}`);
+
       // Find the symbol and its declarations
       if (node.typeName && ts.isIdentifier(node.typeName)) {
-        const type = checker.getTypeAtLocation(node.typeName);
-        if (type && type.symbol) {
-          const declarations = type.symbol.getDeclarations();
-          if (declarations && declarations.length > 0) {
-            const declaration = declarations[0];
-            const sourceFile = declaration.getSourceFile();
-            if (sourceFile) {
-              if (sourceFile.fileName.includes("node_modules/typescript/lib")) {
-                logger.debug(`[NATS] Ignoring import for built-in type ${typeName} from ${sourceFile.fileName}`);
-                return;
-              }
-              if (typeName === "Partial" || typeName === "Omit") {
-                logger.debug(`[NATS] Ignoring import for built-in type ${typeName}`);
-                return;
-              }
+        try {
+          const type = checker.getTypeAtLocation(node.typeName);
+          logger.debug(`[NATS] Got type for ${typeName}:`, {
+            hasType: !!type,
+            hasSymbol: !!(type && type.symbol),
+          });
 
-              if (!sourceFile.fileName.includes(path.resolve(scanPath))) {
-                logger.debug(`[NATS] Ignoring import for type ${typeName} because it's outside the scan path`);
-                return;
+          if (type && type.symbol) {
+            const declarations = type.symbol.getDeclarations();
+            logger.debug(`[NATS] Declarations for ${typeName}:`, {
+              hasDeclarations: !!declarations,
+              declarationCount: declarations?.length,
+            });
+
+            if (declarations && declarations.length > 0) {
+              const declaration = declarations[0];
+              const sourceFile = declaration.getSourceFile();
+              logger.debug(`[NATS] Source file for ${typeName}:`, {
+                fileName: sourceFile?.fileName,
+                exists: !!sourceFile,
+              });
+
+              if (sourceFile) {
+                // Skip TypeScript built-in types
+                if (sourceFile.fileName.includes("node_modules/typescript/lib")) {
+                  logger.debug(`[NATS] Skipping built-in type ${typeName} from ${sourceFile.fileName}`);
+                  return;
+                }
+
+                // Skip utility types
+                if (["Partial", "Omit", "Pick", "Record", "Exclude", "Extract"].includes(typeName)) {
+                  logger.debug(`[NATS] Skipping utility type ${typeName}`);
+                  return;
+                }
+
+                // Handle imports from any source file
+                const modulePath = sourceFile.fileName;
+                const relativePath = path.relative(path.dirname(outputPath), modulePath).replace(/\.ts$/, "");
+
+                logger.debug(`[NATS] Import path resolution for ${typeName}:`, {
+                  originalPath: modulePath,
+                  outputPath: outputPath,
+                  relativePath: relativePath
+                });
+
+                // Check if the type is already imported
+                const isAlreadyImported = Array.from(imports).some(imp => imp.includes(`{ ${typeName} }`));
+                logger.debug(`[NATS] Import status for ${typeName}:`, {
+                  isAlreadyImported,
+                  currentImports: Array.from(imports)
+                });
+
+                if (!isAlreadyImported) {
+                  const importStatement = `import { ${typeName} } from '${relativePath}';`;
+                  logger.debug(`[NATS] Adding import statement: ${importStatement}`);
+                  imports.add(importStatement);
+                }
               }
-              const moduleName = sourceFile.fileName;
-              const relativePath = path.relative(path.dirname(outputPath), moduleName).replace(/\.ts$/, "");
-              logger.debug(`[NATS] Resolved type ${typeName} to module: ${moduleName}, relative path: ${relativePath}`);
-              imports.add(`import { ${typeName} } from '${relativePath}';`);
             }
+          } else {
+            logger.debug(`[NATS] No type or symbol found for ${typeName}`);
           }
+        } catch (error) {
+          logger.error(`[NATS] Error processing type ${typeName}:`, error);
         }
       }
     }
   }
 
-  ts.forEachChild(node, (child) => collectImports(child, imports, logger, checker, outputPath, scanPath));
+  // Process type arguments for generic types
+  if (ts.isTypeReferenceNode(node) && node.typeArguments) {
+    logger.debug(`[NATS] Processing generic type arguments:`, {
+      count: node.typeArguments.length
+    });
+    node.typeArguments.forEach((typeArg, index) => {
+      logger.debug(`[NATS] Processing type argument ${index + 1}/${node.typeArguments!.length}`);
+      collectImports(typeArg, imports, logger, checker, outputPath, scanPath);
+    });
+  }
+
+  // Log node kind for debugging
+  logger.debug(`[NATS] Node kind: ${ts.SyntaxKind[node.kind]}`);
+
+  // Recursively process child nodes
+  ts.forEachChild(node, (child: ts.Node) => {
+    logger.debug(`[NATS] Processing child node`);
+    collectImports(child, imports, logger, checker, outputPath, scanPath);
+  });
 }
 
 function extractReturnType(node: ts.TypeNode, checker: ts.TypeChecker): string | null {
