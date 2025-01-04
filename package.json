@@ -26,7 +26,7 @@
     "commit": "commit",
     "reinstall": "clean && bun install",
     "build": "tsc && tsc -p tsconfig.build.json",
-    "source": "generate-source output=source.md exclude=dist/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
+    "source": "generate-source output=source.md exclude=dist/,README.md,nats-rpc.test.ts,*.tgz,.gitignore",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "build:tgz": "bun run build && bun pm pack",

@@ -1,255 +1,220 @@
-# rpc-nats-alvamind
+# ⚡️ rpc-nats-alvamind ⚡️
 
-[![NPM Version](https://img.shields.io/npm/v/rpc-nats-alvamind)](https://www.npmjs.com/package/rpc-nats-alvamind)
-[![License](https://img.shields.io/npm/l/rpc-nats-alvamind)](https://github.com/alvamind/rpc-nats-alvamind/blob/main/LICENSE)
+**A Flexible RPC Library Using NATS with Automatic Type Generation**
 
-A flexible and powerful RPC (Remote Procedure Call) library using NATS as a message broker, designed for microservices architectures and distributed systems. This library allows you to easily create and consume RPC services in your TypeScript applications.
+[![npm version](https://badge.fury.io/js/rpc-nats-alvamind.svg)](https://badge.fury.io/js/rpc-nats-alvamind)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
-## Key Features
+Tired of the endless cycle of defining types, writing code, and then debugging type mismatches in your microservices? `rpc-nats-alvamind` is here to revolutionize your workflow! This library seamlessly integrates with NATS to provide a robust, scalable RPC framework, while its built-in type generation tool ensures that your services are always in sync and your code remains type-safe. Say goodbye to manual type juggling and hello to streamlined development. ✨
 
-*   **Flexible Dependency Injection:** Supports any dependency injection container via a configurable `DependencyResolver` interface.
-*   **Automatic Controller & Method Registration:** Automatically registers all controller methods as NATS subjects, reducing boilerplate.
-*   **Customizable Subject Patterns:** Allows you to define custom patterns for NATS subject names.
-*   **Error Handling:** Provides a customizable error handler for NATS message processing.
-*   **Type-Safe:** Built with TypeScript to ensure type safety and provide a better development experience.
-*   **Easy to Use:** Simple and intuitive API for both setting up the library and making RPC calls.
-*   **Controller Proxy**: Creates a controller proxy to be used on other controllers to make RPC calls easy.
+## ✨ Key Features and Benefits
 
-## Installation
+*   **RPC Made Easy:** Expose your TypeScript classes and methods as RPC endpoints with minimal configuration.
+*   **NATS Integration:** Leverages the power and speed of NATS for message transport, ensuring low-latency communication between your services. 🚀
+*   **Automatic Service Discovery:** The library scans your project directory, automatically discovering and registering all eligible services. 🔎
+*   **TypeScript Native:** Built for TypeScript, providing compile-time type safety and a smoother developer experience. 💪
+*   **Code-First Approach:** Start with your service code, and let the library generate the necessary types. No need to write interfaces manually! ✍️
+*   **Flexible Codecs:** Supports various message codecs, with JSON codec as the default, and the option for custom codecs like StringCodec.
+*   **Built-in Retry Logic:**  Automatically retries failed requests with configurable retry parameters, enhancing resilience and reliability. 🔄
+*   **Dead Letter Queue (DLQ):** Handles failed requests by sending them to a designated DLQ, ensuring no messages are lost. 🪦
+*   **Streaming Capabilities:** Facilitates asynchronous message processing, perfect for long-running operations or real-time data streams. 🌊
+*   **Contextual Requests:** Allows you to pass request-specific context data, providing valuable information for logging and tracing. 🎭
+*   **CLI Type Generation:** Uses  `method-types-ts-generator-alvamind` to automatically generate TypeScript types for your exposed methods, accessible via a simple CLI command. 🪄
+*   **Simple API:** Provides a straightforward API to interact with NATS and your exposed methods. 💨
+*   **Framework Agnostic:** Works seamlessly with any TypeScript project, regardless of the chosen framework.
+*   **Open Source and Free:** Open source and available for use with no restrictions, contribution and feedback is always welcomed! 🎉
+
+## 🚀 Getting Started: Generate First, Code Later
+
+`rpc-nats-alvamind` encourages a **code-first** approach. You define your services, and the library automatically generates the necessary TypeScript types. Let's dive in.
+
+### Installation
+
+```bash
+bun add rpc-nats-alvamind
+```
+
+or
 
 ```bash
 npm install rpc-nats-alvamind
 ```
 
-## Usage
+### Step 1: Define Your Services (Without Types)
 
-### 1. Setup `NatsRpc` and `DependencyResolver`
-
-First, you need to create an instance of `NatsRpc` with the appropriate configuration, including a `DependencyResolver`.
+Create your service classes with methods as you normally would, without worrying about defining complex interfaces.
 
 ```typescript
-import { NatsRpc, TsyringeResolver } from 'rpc-nats-alvamind';
-import { container } from 'tsyringe-neo'; // Or your preferred DI container
+// src/services/math-service.ts
 
-const natsRpc = new NatsRpc({
-  dependencyResolver: new TsyringeResolver(), // Or implement your own resolver
-  natsUrl: 'nats://localhost:4222', // Your NATS server URL
-  subjectPattern: (className, methodName) => `${className}-${methodName}`, // Optional: Custom subject pattern
-  errorHandler: (error, subject) => console.error(`Nats error ${subject}`, error), // Optional: Custom error handler
-  requestTimeout: 10000, //Optional request timeout in milliseconds
-});
-
-
-container.register(NatsRpc, { useValue: natsRpc }); // Register NatsRpc as dependency
-
-```
-
-### 2. Register Your Controllers
-
-Register your controllers with your DI container and register each one with NatsRpc:
-
-```typescript
-// Controller Example
-import { inject, injectable } from 'tsyringe-neo';
-import { NatsRpc } from 'rpc-nats-alvamind';
-import {CategoryService} from "./category.service"
-
-@injectable()
-export class CategoryController {
-   constructor(
-        @inject(NatsRpc) private readonly natsRpc: NatsRpc,
-        @inject(CategoryService) private readonly categoryService: CategoryService
-        ){
-       }
-
-    async getCategoryById(id: { id: number }) {
-        return await this.categoryService.findUnique({ where: { id: id.id } });
+export class MathService {
+    async add(data: { a: number; b: number }): Promise<{ result: number }> {
+        console.log('Processing add request: ', data);
+        return { result: data.a + data.b };
     }
+
+    async subtract(data: { a: number; b: number }): Promise<{ result: number }> {
+        console.log('Processing subtract request: ', data);
+        return { result: data.a - data.b };
+    }
+
+   async multiply(data: { a: number; b: number }): Promise<{ result: number }> {
+        console.log('Processing multiply request: ', data);
+        return { result: data.a * data.b };
+   }
 }
 
-// Service Example
-import { injectable } from 'tsyringe-neo';
-// ...  prisma client import
-@injectable()
-export class CategoryService {
-    constructor(/* inject prismaClient */){}
-    async findUnique(args: any){
-        //....
-    }
+
+// src/services/user-service.ts
+interface User {
+    id: number;
+    name: string;
+    email: string;
 }
-```
+export class UserService {
+  async getUser(id: number): Promise<User> {
+    console.log('Processing get user request: ', id);
+    return {
+        id: id,
+        name: 'John Doe',
+        email: 'john.doe@example.com',
+    };
+  }
 
-Register your controller in your DI container and with NatsRpc:
+  async createUser(name: string, email:string): Promise<User>{
+      console.log('Processing create user request: ', name, email);
+      return { id: 1, name: name, email: email };
+  }
 
-```typescript
-container.register('CategoryController', { useClass: CategoryController }); // register with DI
-natsRpc.registerController('CategoryController')// register with Nats
-```
-
-### 3. Make RPC Calls
-
-Now you can make RPC calls from other controllers using the controller proxy returned by `getControllerProxy` method of `NatsRpc` after register your controller :
-
-```typescript
-// Another controller (e.g., ProductController)
-import { inject, injectable } from 'tsyringe-neo';
-import { NatsRpc } from 'rpc-nats-alvamind';
-import { CategoryController } from '../category/category.controller';
-
-@injectable()
-export class ProductController {
-  private categoryController: CategoryController;
-  constructor(@inject(NatsRpc) private readonly natsRpc: NatsRpc) {
-       this.categoryController = this.natsRpc.getControllerProxy<CategoryController>('CategoryController');
-    }
-
-
-  async getProductWithCategory(id: number) {
-    // Make an RPC call to CategoryController.getCategoryById
-    const category = await this.categoryController.getCategoryById({id});
-    // ... do something with category
+  async updateUser(id:number, user: Partial<User>): Promise<User> {
+      console.log('Processing update user request: ', id, user);
+      return { ...user, id: id} as User
   }
 }
 ```
 
-### 4. Implement Custom Dependency Resolver
+### Step 2: Generate TypeScript Types
 
-If you are not using `tsyringe-neo`, you can implement the `DependencyResolver` interface to integrate with your container:
+Use the CLI command to generate the `ExposedMethods` interface based on your services:
+
+```bash
+rpc-nats-alvamind generate ./src/services ./src/generated/exposed-methods.d.ts
+```
+
+This command scans the specified directory (`./src/services`), analyzes the exported classes, and creates a `exposed-methods.d.ts` file in the `./src/generated` directory. This file contains the `ExposedMethods` interface that can be used for type-safe interaction with your services.
+
+The generated `exposed-methods.d.ts` will look like this:
 
 ```typescript
-import { DependencyResolver } from 'rpc-nats-alvamind';
+// Auto-generated by method-types-ts-generator-alvamind
 
-class MyResolver implements DependencyResolver {
-  resolve<T>(token: any): T {
-    // Your DI container logic to resolve the token
+export interface ExposedMethods {
+    MathService: {
+      add(data: { a: number; b: number }): Promise<{ result: number }>;
+      subtract(data: { a: number; b: number }): Promise<{ result: number }>;
+      multiply(data: { a: number; b: number }): Promise<{ result: number }>;
+    };
+    UserService: {
+        getUser(id: number): Promise<User>;
+        createUser(name: string, email: string): Promise<User>;
+        updateUser(id: number, user: Partial<User>): Promise<User>;
+    };
   }
-  registeredTokens(): any[] {
-      // Get registered tokens in your DI
-       return [];
-  }
-}
+
 ```
 
-and configure using this implementation as:
+### Step 3: Initialize the NATS Client
 
 ```typescript
-const natsRpc = new NatsRpc({
-    dependencyResolver: new MyResolver(), // Using your custom implementation
-    natsUrl: 'nats://localhost:4222',
-});
+import { NatsClient, NatsOptions } from 'rpc-nats-alvamind';
+import { ExposedMethods } from './src/generated/exposed-methods';
+
+const options: NatsOptions = {
+  natsUrl: 'nats://localhost:4222',
+  scanPath: './src/services', // Path to your services
+};
+const client = new NatsClient<ExposedMethods>();
+await client.connect(options);
+
 ```
 
-## API Reference
+### Step 4: Call Your Services
 
-### `NatsRpc` Class
-
-#### Constructor
+Now you can interact with your services using the generated `ExposedMethods` interface:
 
 ```typescript
-constructor(options: NatsRpcOptions);
+const exposedMethods = client.getExposedMethods();
+
+// Call the math service methods
+const addResult = await exposedMethods.MathService.add({ a: 5, b: 3 });
+console.log('Add result:', addResult);
+
+const subResult = await exposedMethods.MathService.subtract({ a: 5, b: 3 });
+console.log('Subtract result:', subResult);
+
+const multiplyResult = await exposedMethods.MathService.multiply({a: 5, b: 3})
+console.log('Multiply result', multiplyResult)
+
+// Call user service methods
+const user = await exposedMethods.UserService.getUser(1);
+console.log('User:', user);
+
+const createdUser = await exposedMethods.UserService.createUser('Jane Doe', 'jane.doe@example.com')
+console.log('Created User: ', createdUser)
+
+const updatedUser = await exposedMethods.UserService.updateUser(1, { name: 'John Doe Updated'})
+console.log('Updated User: ', updatedUser);
 ```
 
-*   `options`:
-    *   `dependencyResolver`: An instance of a class implementing the `DependencyResolver` interface.
-    *   `natsUrl`: The URL of your NATS server.
-    *   `subjectPattern`: *(Optional)* A function to define a custom subject pattern. It receives `className` and `methodName` and should return a string (subject). Default is `${className}.${methodName}`
+### Step 5: Enjoy Type Safety and Enhanced Productivity!
 
-        ```typescript
-        (className: string, methodName: string) => string;
-        ```
-    *   `errorHandler`: *(Optional)* A function to handle errors that occur when processing NATS messages. It receives the error and the subject and can handle errors differently based on the subject.
+By generating types before writing your consuming code, you are ensure all of your service communication is type safe!
 
-        ```typescript
-        (error: any, subject: string) => void;
-        ```
-    *   `requestTimeout` *(Optional)* The timeout in milliseconds for NATS request call. Default to 10000ms
+## ⚙️ How It Works Under The Hood
 
-#### `registerController` Method
+1.  **Class Scanning**: The `NatsScanner` recursively scans your designated service directories, discovering classes intended for RPC.
+2.  **Method Extraction**: It extracts method signatures (name, parameters, return types) from the discovered classes.
+3.  **Type Generation**: Using `method-types-ts-generator-alvamind`, the library generates a TypeScript interface (`ExposedMethods`) representing all exposed methods.
+4.  **NATS Connection**: The `NatsClient` establishes a connection to the NATS server based on provided configurations.
+5.  **Message Handling**: The `NatsRegistry` registers message handlers and subscribes to NATS subjects for each exposed method.
+6.  **Request Processing**: When a request arrives, the appropriate handler is invoked, processing the request and sending a response through NATS.
 
-```typescript
-async registerController(token: any): Promise<void>;
-```
+## 🗺️ Roadmap
 
-Registers all methods from a controller as NATS subjects
+*   [x] **v1.0.0**: Initial release with core functionality and basic type generation.
+*   [ ] **v1.1.0**: Support for filtering classes/methods with decorators, allowing more granular control over service exposure.
+*   [ ] **v1.2.0**: Configurable naming patterns for generated interfaces, providing better consistency and customization options.
+*   [ ] **v1.3.0**: Support for comments and jsDoc in generated types, improving the quality and maintainability of generated code.
+*   [ ] **v1.4.0**: Watch mode, automatically regenerate types on file changes for faster development iterations.
+*   [ ] **v1.5.0**: Improve streaming functionalities for efficient handling of asynchronous communication.
+*   [ ] **v1.6.0**: Metrics and monitoring support for better performance observability and system health tracking.
 
-*   `token`: The token of the controller to be registered. The token is usually the controller name or class itself.
+## ⚠️ Disclaimer
 
-#### `getControllerProxy` Method
+This library is provided as-is, without any warranties. Use it at your own risk. While efforts have been made to ensure the stability and reliability of the library, no guarantees are provided that it will be suitable for every use case. Thorough testing in your specific environments is strongly recommended.
 
-```typescript
-getControllerProxy<T>(controllerName: string): T;
-```
+## 🤝 Open Contribution
 
-Get a controller proxy for making RPC calls. The proxy will use `NatsRpc.call` under the hood, making it easy to call methods from other controller.
+We actively encourage and welcome contributions from the community! If you have ideas for improvements, bug reports, or feature requests, please submit them as issues. To contribute to the code, follow these steps:
 
-*   `controllerName`: The name or key of the controller.
+1.  Fork the repository to your GitHub account.
+2.  Create a new branch containing your changes.
+3.  Submit a pull request with a clear explanation of the changes.
+4.  Ensure that your code adheres to the code style of the project.
 
-#### `call` Method
+## 💖 Support & Donation
 
-```typescript
-async call<T, R>(subject: string, data: T): Promise<R>;
-```
+`rpc-nats-alvamind` is an open-source passion project that we have poured our time and energy into. If you find the library helpful, consider showing your support with a donation! Your support helps ensure ongoing maintenance, new feature development, and contributes back to the open-source community.
 
-Makes an RPC call to a NATS subject
+*   **GitHub Sponsors:** [Link to GitHub Sponsors](https://github.com/sponsors/alvamind)
+*   **Buy us a coffee:** [Link to donation page](https://www.buymeacoffee.com/alvamind)
 
-*   `subject`: The NATS subject to call
-*   `data`: The data to send to the subject
+## 📧 Contact
 
-### `DependencyResolver` Interface
+If you have any questions or feedback, we'd love to hear from you. Please feel free to reach out using any of the following methods:
 
-```typescript
-interface DependencyResolver {
-    resolve<T>(token: any): T;
-    registeredTokens(): any[];
-}
-```
+*   Email: [alvaminddigital@gmail.com](mailto:alvaminddigital@gmail.com)
+*   GitHub: [Alvamind GitHub](https://github.com/alvamind)
 
-Used to interact with any Dependency Injection library.
-
-*   `resolve<T>(token: any): T`: Resolve the requested instance of token
-*   `registeredTokens()`: Returns a list of tokens that was registered
-
-### `TsyringeResolver` Class
-
-This class already implemented `DependencyResolver` interface and ready to be used with Tsyringe DI container.
-
-```typescript
-class TsyringeResolver implements DependencyResolver
-```
-
-### `NatsRpcOptions` Interface
-
-```typescript
-interface NatsRpcOptions {
-    dependencyResolver: DependencyResolver;
-    subjectPattern?: (className: string, methodName: string) => string;
-    errorHandler?: (error: any, subject: string) => void;
-    natsUrl: string
-    requestTimeout?: number
-}
-```
-
-Used for configuration.
-
-## Examples
-
-You can find more examples in the [GitHub repository](https://github.com/alvamind/rpc-nats).
-
-## Roadmap
-
-*   **Dynamic Serialization/Deserialization:** Support for dynamically selecting serialization/deserialization methods other than JSON (e.g., MessagePack, Protobuf).
-*   **Improved Error Handling:** More granular control over error handling, including custom error codes.
-*   **Middleware Support:** Ability to add middleware for request processing.
-*   **Load Balancing and Failover:** Built-in mechanisms for load balancing and failover scenarios.
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request or open an issue for any bugs or feature requests.
-
-## License
-
-This library is licensed under the MIT License.
-
-## Contact
-
-[alvaminddigital@gmail.com](mailto:alvaminddigital@gmail.com)
+Let's build amazing things together! 🚀
