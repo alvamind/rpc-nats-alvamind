@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { NatsConnection, Codec, JSONCodec } from 'nats';
 import { NatsOptions, ClassInfo, Payload, ErrorObject, MethodInfo } from './types';
 import { NatsScanner } from './nats-scanner';

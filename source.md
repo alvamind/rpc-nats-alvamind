@@ -1,5 +1,6 @@
 # Project: rpc-nats-alvamind
 
+dist
 scripts
 src
 test
@@ -10,9 +11,9 @@ test/services
   "name": "rpc-nats-alvamind",
   "version": "1.0.0",
   "description": "A flexible RPC library using NATS",
-  "main": "build/index.js",
-  "module": "build/index.mjs",
-  "types": "build/index.d.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
@@ -24,15 +25,16 @@ test/services
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
-    "source": "generate-source output=source.md exclude=build/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
-    "clean": "rm -rf .bun .turbo .eslintcache .parcel-cache node_modules .next .cache dist build coverage .eslintcache .parcel-cache .turbo .vite yarn.lock package-lock.json bun.lockb pnpm-lock.yaml .DS_Store && echo 'Done.'",
-    "build:type": "tsc --emitDeclarationOnly",
-    "build": "bun run build:type && bun build ./src/index.ts --outdir ./build --target node",
+    "build": "tsc",
+    "source": "generate-source output=source.md exclude=dist/,README.md,nats-rpc.test.ts,rpc-nats-alvamind-1.0.0.tgz,.gitignore",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
     "build:tgz": "bun run build && bun pm pack",
+    "test": "bun test test/*.test.ts",
     "postinstall": "node ./scripts/postinstall.js"
   },
   "bin": {
-    "rpc-nats-alvamind": "./scripts/generate-type-cli.ts"
+    "rpc-nats-alvamind": "./dist/scripts/generate-type-cli.js"
   },
   "keywords": [
     "rpc",
@@ -41,8 +43,10 @@ test/services
     "typescript"
   ],
   "files": [
-    "build",
-    "scripts"
+    "dist",
+    "src",
+    "scripts",
+    "README.md"
   ],
   "author": "Alvamind",
   "license": "MIT",
@@ -56,13 +60,14 @@ test/services
   "devDependencies": {
     "@types/node": "^20.17.11",
     "bun-types": "^1.1.42",
+    "rimraf": "^5.0.0",
     "typescript": "^5.7.2"
   }
 }
 
 // scripts/generate-type-cli.ts
 #!/usr/bin/env bun
-import { generateTypeCli } from 'rpc-nats-alvamind';
+import { generateTypeCli } from '../src/generate-exposed-types';
 const args = process.argv.slice(2);
 const scanPath = args[1];
 const outputPath = args[2];
@@ -988,22 +993,21 @@ export class MathService {
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ESNext"],
+    "module": "commonjs",
     "declaration": true,
-    "outDir": "build",
-    "types": ["bun-types"],
-    "sourceMap": true,
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "node",
     "emitDecoratorMetadata": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "lib": ["ESNext"],
+    "types": ["bun-types"]
   },
-  "include": ["src*.ts", "src*.ts", "test/*.ts"],
+  "include": ["src*.ts", "scripts*.ts"],
   "exclude": ["node_modules"]
 }
 

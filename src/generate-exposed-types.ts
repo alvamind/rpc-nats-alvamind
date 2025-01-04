@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { NatsRegistry } from './nats-registry';
 import { NatsOptions } from './types';
 import { Logger, pino } from 'pino';

@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import 'reflect-metadata';
+
 import { generateTypeCli } from '../src/generate-exposed-types';
 const args = process.argv.slice(2);
 const scanPath = args[1];
