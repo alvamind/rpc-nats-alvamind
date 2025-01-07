@@ -20,7 +20,7 @@
     "compose": "docker compose up -d",
     "commit": "commit",
     "reinstall": "bun clean && bun install",
-    "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/src/*.js",
+    "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/*.js",
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "clean",
     "build:tgz": "bun run build && bun pm pack",
