@@ -2,7 +2,7 @@
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { glob } from 'glob';
-import fs from 'node:fs/promises';
+import fs, { mkdir } from 'node:fs/promises';
 import { Project } from 'ts-morph';
 import path from 'node:path';
 import chokidar from 'chokidar';
@@ -43,6 +43,7 @@ const argv = yargs(hideBin(process.argv))
   .parseSync();
 
 export async function generateRpcServices(includes: string[], excludes: string[], outputFile: string) {
+  await mkdir(path.dirname(outputFile), { recursive: true });
   const startTime = Date.now();
   console.info('Starting RPC services generation...');
 

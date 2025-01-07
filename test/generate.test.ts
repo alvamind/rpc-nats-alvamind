@@ -1,5 +1,5 @@
 // rpc-nats-alvamind/test/generate.test.ts
-import { describe, test, beforeAll, afterAll, expect } from 'bun:test';
+import { describe, test, beforeAll, afterAll, expect, beforeEach } from 'bun:test';
 import { generateRpcServices } from '../src/generate-services';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -133,5 +133,138 @@ describe('generateRpcServices - Real Scenarios', () => {
     expect(outputFileContent).toContain(`import { SomeLongNameController } from '${path.relative(path.dirname(outputFilePath), path.join(controllersDir, 'subdir', 'some-long-name.controller.ts')).replace(/\\/g, '/').replace(/\.ts$/, '')}';`);
     expect(outputFileContent).toContain('SomeLongNameController: ClassTypeProxy<SomeLongNameController>;');
     expect(outputFileContent).toContain('this.SomeLongNameController = this.rpcClient.createProxy(SomeLongNameController);');
+  });
+});
+
+describe('generateRpcServices - Edge Cases and Error Handling', () => {
+  beforeEach(async () => {
+    await deleteTestFiles();
+    await createTestFiles();
+  });
+
+  afterAll(async () => {
+    await deleteTestFiles();
+  });
+
+  test('should handle multiple includes patterns correctly', async () => {
+    // Create both controller directories
+    await fs.mkdir(path.join(testDir, 'other-controllers'), { recursive: true });
+    await fs.writeFile(
+      path.join(testDir, 'other-controllers', 'payment.controller.ts'),
+      `
+      export class PaymentController {
+          async processPayment(): Promise<boolean> {
+              return true;
+          }
+      }
+      `
+    );
+
+    const includes = [
+      `${controllersDir}/**/*.ts`,
+      `${testDir}/other-controllers/**/*.ts`
+    ];
+    const excludes = [];
+
+    await generateRpcServices(includes, excludes, outputFilePath);
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+
+    expect(outputFileContent).toContain('PaymentController');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).toContain('AuthController');
+  });
+
+  test('should handle excludes patterns correctly', async () => {
+    const includes = [`${controllersDir}/**/*.ts`];
+    const excludes = [`${controllersDir}/**/auth.controller.ts`];
+
+    await generateRpcServices(includes, excludes, outputFilePath);
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).not.toContain('AuthController');
+  });
+
+  test('should handle files with multiple classes', async () => {
+    await fs.writeFile(
+      path.join(controllersDir, 'multiple.controller.ts'),
+      `
+      export class FirstController {
+          async method1(): Promise<void> {}
+      }
+
+      export class SecondController {
+          async method2(): Promise<void> {}
+      }
+
+      export class NonControllerClass {
+          method3() {}
+      }
+      `
+    );
+
+    const includes = [`${controllersDir}/multiple.controller.ts`];
+    const excludes = [];
+
+    await generateRpcServices(includes, excludes, outputFilePath);
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+
+    expect(outputFileContent).toContain('FirstController');
+    expect(outputFileContent).toContain('SecondController');
+    expect(outputFileContent).not.toContain('NonControllerClass');
+  });
+
+  test('should handle invalid TypeScript syntax gracefully', async () => {
+    // First write valid controllers
+    await createTestFiles();
+
+    // Then add invalid controller
+    await fs.writeFile(
+      path.join(controllersDir, 'invalid.controller.ts'),
+      `
+      export class InvalidController {
+          async broken(): Promise<void>
+          // Missing implementation and closing brace
+      `
+    );
+
+    const includes = [`${controllersDir}/**/*.ts`];
+    const excludes = [];
+
+    await generateRpcServices(includes, excludes, outputFilePath);
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+
+    // Should still generate valid output for other controllers
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).toContain('AuthController');
+  });
+
+  test('should handle empty controller classes', async () => {
+    await fs.writeFile(
+      path.join(controllersDir, 'empty.controller.ts'),
+      `
+      export class EmptyController {}
+      `
+    );
+
+    const includes = [`${controllersDir}/empty.controller.ts`];
+    const excludes = [];
+
+    await generateRpcServices(includes, excludes, outputFilePath);
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+
+    expect(outputFileContent).toContain('EmptyController');
+  });
+
+  test('should handle output to non-existent directory', async () => {
+    const newOutputPath = path.join(testDir, 'new-dir', 'rpc-services.ts');
+    const includes = [`${controllersDir}/**/*.ts`];
+    const excludes = [];
+
+    await generateRpcServices(includes, excludes, newOutputPath);
+    const outputFileContent = await fs.readFile(newOutputPath, 'utf-8');
+
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).toContain('AuthController');
   });
 });
