@@ -1,6 +1,6 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "A flexible RPC library using NATS",
   "type": "module",
   "main": "dist/index.js",
@@ -22,7 +22,7 @@
     "compose": "docker compose up -d",
     "commit": "commit",
     "reinstall": "clean && bun install",
-    "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/scripts/*.js",
+    "build": "tsc && tsc -p tsconfig.build.json && cp -r src/core/utils dist/src/core/ && chmod +x dist/scripts/*.js",
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "clean",
     "build:tgz": "bun run build && bun pm pack",

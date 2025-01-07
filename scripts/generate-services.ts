@@ -8,7 +8,6 @@ import { Project, SourceFile } from 'ts-morph';
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
-import { Logger } from '../src/core/utils/logger';
 
 const argv = yargs(hideBin(process.argv))
   .command('generate', 'Generate rpc-services.ts file', (yargs) => {
@@ -43,28 +42,25 @@ const argv = yargs(hideBin(process.argv))
   })
   .parseSync();
 
-// Set log level from command line argument
-Logger.setLogLevel(argv.logLevel as any);
-
 async function generateRpcServices(includes: string[], excludes: string[], outputFile: string) {
   const startTime = Date.now();
-  Logger.info('Starting RPC services generation...');
+  console.info('Starting RPC services generation...');
 
   let files: string[] = [];
   try {
-    files = includes.reduce<string[]>((acc, include) => {
+    files = includes.reduce < string[] > ((acc, include) => {
       const matchedFiles = glob.sync(include, { ignore: excludes });
       return [...acc, ...matchedFiles];
     }, []);
 
     if (!files.length) {
-      Logger.warn('No files found with provided includes/excludes.');
+      console.warn('No files found with provided includes/excludes.');
       return;
     }
-    Logger.info(`Files Scanned: ${files.length}`);
-    Logger.debug('Matched files:', files);
+    console.info(`Files Scanned: ${files.length}`);
+    console.debug('Matched files:', files);
   } catch (error) {
-    Logger.error('Error scanning files:', error);
+    console.error('Error scanning files:', error);
     return;
   }
 
@@ -75,7 +71,7 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
     });
     project.addSourceFilesAtPaths(files);
 
-    classes = project.getSourceFiles().reduce<{ name: string; path: string }[]>((acc, sourceFile) => {
+    classes = project.getSourceFiles().reduce < { name: string; path: string }[] > ((acc, sourceFile) => {
       const foundClasses = sourceFile.getClasses().map((c) => ({
         name: c.getName()!,
         path: sourceFile.getFilePath(),
@@ -84,13 +80,13 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
     }, []);
 
     if (!classes.length) {
-      Logger.warn('No classes found in provided files.');
+      console.warn('No classes found in provided files.');
       return;
     }
-    Logger.info(`Classes detected: ${classes.length}`);
-    Logger.debug('Detected classes:', classes);
+    console.info(`Classes detected: ${classes.length}`);
+    console.debug('Detected classes:', classes);
   } catch (error) {
-    Logger.error('Error detecting classes:', error);
+    console.error('Error detecting classes:', error);
     return;
   }
 
@@ -107,7 +103,7 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
       })
       .join('\n');
 
-    Logger.debug('Generated imports:', classImports);
+    console.debug('Generated imports:', classImports);
 
     const classProperties = classes
       .map((c) => `${c.name.replace(/Controller$/, 'Controller')}: ClassTypeProxy<${c.name}>;`)
@@ -130,16 +126,16 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
     `;
 
     await fs.writeFile(outputFile, outputCode, 'utf-8');
-    Logger.info(`Generated ${outputFile} with ${classes.length} services.`);
-    Logger.debug('Generated code:', outputCode);
+    console.info(`Generated ${outputFile} with ${classes.length} services.`);
+    console.debug('Generated code:', outputCode);
   } catch (error) {
-    Logger.error('Error writing the output file:', error);
+    console.error('Error writing the output file:', error);
     return;
   }
 
   const endTime = Date.now();
   const duration = (endTime - startTime) / 1000;
-  Logger.info(`Completed in ${duration.toFixed(2)} seconds.`);
+  console.info(`Completed in ${duration.toFixed(2)} seconds.`);
 }
 
 async function generateRpcServicesWithWatch(includes: string[], excludes: string[], outputFile: string) {
@@ -152,9 +148,9 @@ async function generateRpcServicesWithWatch(includes: string[], excludes: string
     await generateRpcServices(includes, excludes, outputFile);
     if (!initialGenerationDone) {
       initialGenerationDone = true;
-      Logger.info('Initial generation done. Watching for changes...');
+      console.info('Initial generation done. Watching for changes...');
     } else {
-      Logger.info('Changes detected, Regenerated rpc-services.ts');
+      console.info('Changes detected, Regenerated rpc-services.ts');
     }
   };
 
@@ -166,19 +162,19 @@ async function generateRpcServicesWithWatch(includes: string[], excludes: string
   });
 
   watcher.on('add', (filePath) => {
-    Logger.debug(`File added: ${filePath}`);
+    console.debug(`File added: ${filePath}`);
     project.addSourceFileAtPath(filePath);
     debouncedGenerate();
   });
 
   watcher.on('change', (filePath) => {
-    Logger.debug(`File changed: ${filePath}`);
+    console.debug(`File changed: ${filePath}`);
     project.addSourceFileAtPath(filePath);
     debouncedGenerate();
   });
 
   watcher.on('unlink', (filePath) => {
-    Logger.debug(`File removed: ${filePath}`);
+    console.debug(`File removed: ${filePath}`);
     const sourceFile = project.getSourceFile(filePath);
     if (sourceFile) {
       project.removeSourceFile(sourceFile);
