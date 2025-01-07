@@ -1,6 +1,6 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "A flexible RPC library using NATS",
   "type": "module",
   "main": "dist/index.js",
@@ -53,7 +53,7 @@
   "dependencies": {
     "@typescript-eslint/parser": "^8.19.1",
     "alvamind-tools": "^1.0.20",
-    "chalk": "^5.4.1",
+    "chalk": "4.1.2",
     "chokidar": "^4.0.3",
     "glob": "^11.0.0",
     "lodash": "^4.17.21",
