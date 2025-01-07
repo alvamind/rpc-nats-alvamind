@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env ts-node
 
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -48,7 +48,7 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
 
   let files: string[] = [];
   try {
-    files = includes.reduce < string[] > ((acc, include) => {
+    files = includes.reduce<string[]>((acc, include) => {
       const matchedFiles = glob.sync(include, { ignore: excludes });
       return [...acc, ...matchedFiles];
     }, []);
@@ -71,7 +71,7 @@ async function generateRpcServices(includes: string[], excludes: string[], outpu
     });
     project.addSourceFilesAtPaths(files);
 
-    classes = project.getSourceFiles().reduce < { name: string; path: string }[] > ((acc, sourceFile) => {
+    classes = project.getSourceFiles().reduce<{ name: string; path: string }[]>((acc, sourceFile) => {
       const foundClasses = sourceFile.getClasses().map((c) => ({
         name: c.getName()!,
         path: sourceFile.getFilePath(),

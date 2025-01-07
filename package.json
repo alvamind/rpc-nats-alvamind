@@ -2,58 +2,46 @@
   "name": "rpc-nats-alvamind",
   "version": "1.0.13",
   "description": "A flexible RPC library using NATS",
-  "type": "module",
   "main": "dist/index.js",
-  "module": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+  "bin": {
+    "rpc-nats": "./dist/src/generate-services.js"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
   "scripts": {
-    "dev": "bun run src/index.ts --watch",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "generate-services": "ts-node scripts/generate-services.ts",
+    "generate-services:watch": "ts-node scripts/generate-services.ts --watch",
+    "dev": "bun tsc --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
-    "reinstall": "clean && bun install",
-    "build": "tsc && tsc -p tsconfig.build.json && cp -r src/core/utils dist/src/core/ && chmod +x dist/scripts/*.js",
+    "reinstall": "bun clean && bun install",
+    "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/src/*.js",
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "clean",
     "build:tgz": "bun run build && bun pm pack",
     "test": "bun test test/*.test.ts",
     "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
     "publish-npm": "publish-npm patch",
-    "prepare": "bun run build",
-    "postinstall": "node welcome.js"
-  },
-  "bin": {
-    "rpc-nats": "./dist/scripts/generate-services.js"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "rpc",
     "nats",
-    "microservices",
-    "typescript"
+    "typescript",
+    "microservices"
   ],
-  "files": [
-    "dist",
-    "src",
-    "scripts",
-    "README.md",
-    "index.d.ts"
-  ],
-  "author": "Alvamind",
+  "author": "alvamind",
   "license": "MIT",
   "dependencies": {
     "@typescript-eslint/parser": "^8.19.1",
     "alvamind-tools": "^1.0.20",
-    "chalk": "4.1.2",
+    "chalk": "^5.3.0",
     "chokidar": "^4.0.3",
     "glob": "^11.0.0",
     "lodash": "^4.17.21",
@@ -65,10 +53,15 @@
   },
   "devDependencies": {
     "@types/lodash": "^4.17.14",
-    "@types/node": "^20.17.12",
+    "@types/node": "^22.10.5",
     "@types/yargs": "^17.0.33",
     "bun-types": "^1.1.42",
     "rimraf": "^6.0.1",
-    "typescript": "^5.7.2"
-  }
+    "typescript": "^5.7.2",
+    "ts-node": "^10.9.2"
+  },
+  "files": [
+    "dist/**/*",
+    "welcome.js"
+  ]
 }
