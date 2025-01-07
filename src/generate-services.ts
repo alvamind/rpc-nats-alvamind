@@ -3,11 +3,11 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { glob } from 'glob';
 import fs, { mkdir } from 'node:fs/promises';
-import { Project } from 'ts-morph';
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
 import { Stats } from 'fs';
+import { Project, Node } from 'ts-morph';
 
 const argv = yargs(hideBin(process.argv))
   .command('generate', 'Generate rpc-services.ts file', (yargs) => {
@@ -75,7 +75,7 @@ export class RPCServices {
     return;
   }
 
-  let classes: { name: string; path: string }[] = [];
+  let classes: { name: string; path: string; methods: string[] }[] = [];
   const project = new Project({
     tsConfigFilePath: path.join(process.cwd(), 'tsconfig.json'),
   });
@@ -83,15 +83,42 @@ export class RPCServices {
   try {
     project.addSourceFilesAtPaths(files);
 
-    classes = project.getSourceFiles().reduce<{ name: string; path: string }[]>((acc, sourceFile) => {
-      const foundClasses = sourceFile
-        .getClasses()
-        .filter(c => c.getName()?.endsWith('Controller'))
-        .map((c) => ({
-          name: c.getName()!,
-          path: sourceFile.getFilePath(),
-        }));
-      return [...acc, ...foundClasses];
+    classes = project.getSourceFiles().reduce<{ name: string; path: string; methods: string[] }[]>((acc, sourceFile) => {
+      const exportedDeclarations = sourceFile.getExportedDeclarations();
+      const exportedClasses: { name: string; path: string; methods: string[] }[] = [];
+
+      exportedDeclarations.forEach((declarations, exportName) => {
+        declarations.forEach(declaration => {
+          let classDecl: Node | undefined = declaration;
+
+          // Handle default exports
+          if (Node.isExportAssignment(declaration)) {
+            const expression = declaration.getExpression();
+            if (Node.isClassExpression(expression) || Node.isIdentifier(expression)) {
+              classDecl = Node.isIdentifier(expression)
+                ? sourceFile.getClass(expression.getText())
+                : expression;
+            }
+          }
+
+          // Handle class declarations
+          if (Node.isClassDeclaration(classDecl) && !classDecl.isAbstract()) {
+            const methods = classDecl.getMethods()
+              .map(m => m.getName());
+
+            const className = classDecl.getName() ||
+              (exportName === 'default' ? 'DefaultController' : exportName);
+
+            exportedClasses.push({
+              name: className,
+              path: sourceFile.getFilePath(),
+              methods
+            });
+          }
+        });
+      });
+
+      return [...acc, ...exportedClasses];
     }, []);
 
     if (!classes.length) {
@@ -112,12 +139,11 @@ export class RPCServices {
   } catch (error) {
     console.error('Error detecting classes:', error);
     return;
-  }
+  };
 
   try {
     const classImports = classes
       .map((c) => {
-        const sourceFile = project.getSourceFile(c.path);
         const importPath = path.relative(path.dirname(outputFile), c.path)
           .replace(/\\/g, '/')
           .replace(/\.ts$/, '');
@@ -139,6 +165,13 @@ export class RPCServices {
 import { RPCClient, ClassTypeProxy } from 'rpc-nats-alvamind';
 ${classImports}
 
+/**
+ * RPC Services
+ * ${classes.map(c => `
+ * @property ${c.name}
+ * Available Methods: ${c.methods.join(', ')}
+ *`).join('\n')}
+ */
 export class RPCServices {
 ${classProperties}
 
@@ -158,7 +191,7 @@ ${classInits}
   const endTime = Date.now();
   const duration = (endTime - startTime) / 1000;
   console.info(`Completed in ${duration.toFixed(2)} seconds.`);
-}
+};
 
 
 if (argv._[0] === 'generate') {
