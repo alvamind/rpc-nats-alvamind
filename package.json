@@ -1,6 +1,6 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "A flexible RPC library using NATS",
   "type": "module",
   "main": "dist/index.js",
@@ -17,21 +17,22 @@
     "type": "git",
     "url": "https://github.com/alvamind/rpc-nats-alvamind.git"
   },
-  "prisma": {
-    "seed": "bunx ts-node-esm prisma/seed.ts"
-  },
   "scripts": {
     "dev": "bun run src/index.ts --watch",
     "compose": "docker compose up -d",
     "commit": "commit",
     "reinstall": "clean && bun install",
-    "build": "tsc && tsc -p tsconfig.build.json",
+    "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/scripts/*.js",
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "rimraf dist",
     "build:tgz": "bun run build && bun pm pack",
     "test": "bun test test/*.test.ts",
     "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
-    "publish-npm": "publish-npm patch"
+    "publish-npm": "publish-npm patch",
+    "postinstall": "node dist/scripts/post-install.js"
+  },
+  "bin": {
+    "rpc-nats": "./dist/scripts/generate-services.js"
   },
   "keywords": [
     "rpc",
@@ -49,14 +50,22 @@
   "author": "Alvamind",
   "license": "MIT",
   "dependencies": {
+    "@typescript-eslint/parser": "^8.19.1",
     "alvamind-tools": "^1.0.20",
     "chalk": "^5.4.1",
+    "chokidar": "^4.0.3",
+    "glob": "^11.0.0",
+    "lodash": "^4.17.21",
     "logger-alvamind": "^1.0.1",
     "nats": "^2.28.2",
-    "retry-util-alvamind": "^1.0.1"
+    "retry-util-alvamind": "^1.0.1",
+    "ts-morph": "^25.0.0",
+    "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.14",
     "@types/node": "^20.17.12",
+    "@types/yargs": "^17.0.33",
     "bun-types": "^1.1.42",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2"

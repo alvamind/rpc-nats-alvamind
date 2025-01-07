@@ -1,5 +1,3 @@
-Aight, here's that 5xA4 README, let's get this party started! 🚀
-
 # 📦 rpc-nats-alvamind: Your Go-To RPC Library with NATS
 
 **⚡️ Supercharge your microservices with seamless, reliable communication!**
