@@ -39,12 +39,14 @@ export class RPCClient implements IRPCClient {
     return this.isStarted && this.natsClient.isConnected();
   }
 
+
   createProxy<T extends ClassType>(
-    classConstructor: { new(...args: any[]): T }
+    classConstructor: new (...args: any[]) => T
   ): ClassTypeProxy<T> {
     if (!this.isStarted) {
       throw new Error('RPC Client not started. Call start() first.');
     }
+
     const className = classConstructor.name;
     Logger.debug(`Creating proxy for class: ${className}`);
 
@@ -52,22 +54,22 @@ export class RPCClient implements IRPCClient {
       this.methodCache.set(className, new Map());
     }
 
-    const proxy: ClassTypeProxy<T> = {} as ClassTypeProxy<T>;
-
-    return new Proxy(proxy, {
+    const handler: ProxyHandler<ClassTypeProxy<T>> = {
       get: (target, methodName: string) => {
         const cachedMethod = this.methodCache.get(className)?.get(methodName);
         if (cachedMethod) {
           return cachedMethod;
         }
 
-        const methodProxy = async (...args: any[]) => {
+        const methodProxy = async (...args: any[]): Promise<any> => {
           const subject = `${className}.${methodName}`;
-          Logger.debug(`Client requesting to subject: ${subject}`, args[0]);
+          const input = args[0]; // Take first argument as input
+          Logger.debug(`Client requesting to subject: ${subject}`, input);
+
           try {
             const response = await this.natsClient.request(
               subject,
-              args[0] ?? null, // send null instead of undefined if no args
+              input !== undefined ? input : null, // Send null if input is undefined
               this.timeout
             );
 
@@ -76,52 +78,23 @@ export class RPCClient implements IRPCClient {
             if (response && typeof response === 'object' && 'error' in response) {
               throw new Error(response.error as string);
             }
+
             return response;
           } catch (error) {
             Logger.error(
               `Error calling method "${methodName}" on class "${className}":`,
               error
             );
-            throw error instanceof Error
-              ? error
-              : new Error(`RPC call failed: ${error}`);
-
+            throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
           }
         };
 
-
         this.methodCache.get(className)?.set(methodName, methodProxy);
         return methodProxy;
-      },
-      set: (_target, property, _value) => {
-        throw new Error(
-          `Cannot set property "${String(property)}" on RPC proxy. RPC proxies are read-only.`
-        );
-      },
-      has: (_target, property) => {
-        let proto = classConstructor.prototype;
-        while (proto && proto !== Object.prototype) {
-          if (property in proto) {
-            return true;
-          }
-          proto = Object.getPrototypeOf(proto);
-        }
-        return false;
-      },
-      getOwnPropertyDescriptor: (_target, property) => {
-        const descriptor = Object.getOwnPropertyDescriptor(classConstructor.prototype, property);
-        if (descriptor) {
-          return {
-            ...descriptor,
-            configurable: true,
-          };
-        }
-        return undefined;
-      },
-      ownKeys: (_target) => {
-        return Reflect.ownKeys(classConstructor.prototype);
       }
-    });
+    };
+
+    return new Proxy({} as ClassTypeProxy<T>, handler);
   }
 
   getAvailableMethods(className: string): string[] {

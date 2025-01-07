@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { RPCServer, RPCClient } from "../src";
+import { RPCServer, RPCClient, ClassTypeProxy } from "../src";
 
 const natsUrl = "nats://localhost:4222";
 
@@ -28,7 +28,7 @@ class SlowClass {
 }
 
 class CounterClass {
-  counter = 0;
+  private counter = 0;
   async increment(): Promise<number> {
     this.counter++;
     return this.counter;
@@ -38,11 +38,13 @@ class CounterClass {
 describe("RPC with Prototype Chain", () => {
   let server: RPCServer;
   let client: RPCClient;
-  let baseClient: any;
-  let childClient: any;
+  let baseClient: ClassTypeProxy<BaseClass>;
+  let childClient: ClassTypeProxy<ChildClass>;
+
   beforeAll(async () => {
     server = new RPCServer({ url: natsUrl, debug: true });
     await server.start();
+
     client = new RPCClient({ url: natsUrl, debug: true });
     await client.start();
 
@@ -58,6 +60,7 @@ describe("RPC with Prototype Chain", () => {
     await server.handleRequest(slowInstance);
     await server.handleRequest(counterInstance);
 
+    // Initialize proxies after client is started
     baseClient = client.createProxy(BaseClass);
     childClient = client.createProxy(ChildClass);
 
@@ -73,14 +76,14 @@ describe("RPC with Prototype Chain", () => {
     const result = await baseClient.baseMethod({ id: 123 });
     expect(result).toBeDefined();
     expect(result.id).toBe(123);
-    expect(result.timestamp).toBeDefined();
+    expect(result.timestamp).toBeInstanceOf(Date);
   });
 
   it("should handle inherited base methods from child class", async () => {
     const result = await childClient.baseMethod({ id: 456 });
     expect(result).toBeDefined();
     expect(result.id).toBe(456);
-    expect(result.timestamp).toBeDefined();
+    expect(result.timestamp).toBeInstanceOf(Date);
   });
 
   it("should handle child class specific methods", async () => {
@@ -89,11 +92,6 @@ describe("RPC with Prototype Chain", () => {
     expect(result.name).toBe("test");
     expect(result.message).toBe("Hello from Child");
   });
-
-  it("should fail when accessing non-existent methods", async () => {
-    expect('nonExistentMethod' in baseClient).toBe(false);
-  });
-
 
   it("should properly reflect method availability", () => {
     expect(typeof baseClient.baseMethod).toBe("function");
@@ -105,6 +103,7 @@ describe("RPC with Prototype Chain", () => {
   it("should handle complex inheritance scenarios", async () => {
     const baseResult = await childClient.baseMethod({ id: 789 });
     const childResult = await childClient.childMethod({ name: "test2" });
+
     expect(baseResult.id).toBe(789);
     expect(childResult.name).toBe("test2");
 
@@ -112,6 +111,7 @@ describe("RPC with Prototype Chain", () => {
       childClient.baseMethod({ id: 999 }),
       childClient.childMethod({ name: "parallel" })
     ]);
+
     expect(parallelBase.id).toBe(999);
     expect(parallelChild.name).toBe("parallel");
   });
@@ -120,7 +120,7 @@ describe("RPC with Prototype Chain", () => {
     const timeoutClient = new RPCClient({
       url: natsUrl,
       debug: true,
-      timeout: 300 // Set timeout to 300ms for this test
+      timeout: 300
     });
     await timeoutClient.start();
     const slowProxy = timeoutClient.createProxy(SlowClass);
@@ -130,13 +130,8 @@ describe("RPC with Prototype Chain", () => {
 
   it("should handle errors properly", async () => {
     const errorProxy = client.createProxy(ErrorClass);
-    try {
-      await errorProxy.errorMethod()
-    } catch (error: any) {
-      expect(error.message).toBe("Test error")
-    }
+    await expect(errorProxy.errorMethod()).rejects.toThrow("Test error");
   });
-
 
   it("should handle concurrent requests", async () => {
     const counterProxy = client.createProxy(CounterClass);
@@ -151,7 +146,6 @@ describe("RPC with Prototype Chain", () => {
   it("should cleanup resources properly", async () => {
     const testServer = new RPCServer({ url: natsUrl, debug: true });
     await testServer.start();
-
     const testClient = new RPCClient({ url: natsUrl, debug: true });
     await testClient.start();
 
@@ -160,6 +154,7 @@ describe("RPC with Prototype Chain", () => {
 
     await testServer.close();
     await testClient.close();
+
     expect(testServer.isConnected()).toBe(false);
     expect(testClient.isConnected()).toBe(false);
   });

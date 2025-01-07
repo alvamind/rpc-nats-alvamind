@@ -88,17 +88,19 @@ export class NatsClient implements INatsClient {
     this.nc.publish(subject, encoded, { reply });
     Logger.debug(`Published message on subject ${subject}:`, data);
   }
+
   async request<TRequest = unknown, TResponse = unknown>(
     subject: string,
-    data: TRequest,
+    data: TRequest | null, // Accept null explicitly
     timeout = 5000
   ): Promise<TResponse> {
     if (!this.nc) {
       throw new Error("Nats client not initialized yet");
     }
+
     try {
       Logger.debug(`Sending request to ${subject}:`, data);
-      const encoded = data ? this.codec.encode(data) : undefined;
+      const encoded = data !== null ? this.codec.encode(data) : undefined;
       const response = await this.nc.request(subject, encoded, { timeout });
       const decoded = this.codec.decode(response.data) as TResponse;
       Logger.debug(`Received response from ${subject}:`, decoded);
