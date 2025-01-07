@@ -26,9 +26,7 @@
     "build:tgz": "bun run build && bun pm pack",
     "test": "bun test test/*.test.ts",
     "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
-    "publish-npm": "publish-npm patch",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run build"
+    "publish-npm": "publish-npm patch"
   },
   "keywords": [
     "rpc",
