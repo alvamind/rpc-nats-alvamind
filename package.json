@@ -1,11 +1,11 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "A flexible RPC library using NATS",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "rpc-nats": "./dist/src/generate-services.js"
+    "rpc-nats": "./dist/generate-services.js"
   },
   "repository": {
     "type": "git",
