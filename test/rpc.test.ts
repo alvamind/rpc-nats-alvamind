@@ -1,103 +1,166 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { RPCServer, RPCClient } from "../src";
 
-// Define Base Class
+const natsUrl = "nats://localhost:4222";
+
 class BaseClass {
-  baseMethod(input: { id: number }): Promise<{ id: number, timestamp: Date }> {
-    return Promise.resolve({ id: input.id, timestamp: new Date() });
+  async baseMethod(input: { id: number }): Promise<{ id: number; timestamp: Date }> {
+    return { id: input.id, timestamp: new Date() };
   }
 }
 
-// Define Child Class inheriting from BaseClass
 class ChildClass extends BaseClass {
-  childMethod(input: { name: string }): Promise<{ name: string, message: string }> {
-    return Promise.resolve({ name: input.name, message: "Hello from Child" });
+  async childMethod(input: { name: string }): Promise<{ name: string; message: string }> {
+    return { name: input.name, message: "Hello from Child" };
   }
 }
 
-// Define another unrelated class
-class AnotherClass {
-  anotherMethod(input: { message: string }): Promise<{ result: string }> {
-    return Promise.resolve({ result: input.message + " from Another" });
+class ErrorClass {
+  async errorMethod(): Promise<void> {
+    throw new Error("Test error");
+  }
+}
+
+class SlowClass {
+  async slowMethod(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+}
+
+class CounterClass {
+  counter = 0;
+  async increment(): Promise<number> {
+    this.counter++;
+    return this.counter;
   }
 }
 
 describe("RPC with Prototype Chain", () => {
-  it("should handle inherited methods with type safety", async () => {
+  let server: RPCServer;
+  let client: RPCClient;
+  let baseClient: any;
+  let childClient: any;
+  beforeAll(async () => {
+    server = new RPCServer({ url: natsUrl, debug: true });
+    await server.start();
+    client = new RPCClient({ url: natsUrl, debug: true });
+    await client.start();
 
-    const rpcServer = new RPCServer();
-    await rpcServer.start();
-
-    // Create instances
     const baseInstance = new BaseClass();
     const childInstance = new ChildClass();
-    const anotherInstance = new AnotherClass();
+    const errorInstance = new ErrorClass();
+    const slowInstance = new SlowClass();
+    const counterInstance = new CounterClass();
 
-    // Setup the Server
-    rpcServer.handleRequest(baseInstance);
-    rpcServer.handleRequest(childInstance);
-    rpcServer.handleRequest(anotherInstance);
+    await server.handleRequest(baseInstance);
+    await server.handleRequest(childInstance);
+    await server.handleRequest(errorInstance);
+    await server.handleRequest(slowInstance);
+    await server.handleRequest(counterInstance);
 
+    baseClient = client.createProxy(BaseClass);
+    childClient = client.createProxy(ChildClass);
 
-    const rpcClient = new RPCClient()
-    await rpcClient.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+  });
 
-    // Create proxy client for all classes.
-    const baseClient = rpcClient.createProxy(BaseClass)
-    const childClient = rpcClient.createProxy(ChildClass);
-    const anotherClient = rpcClient.createProxy(AnotherClass);
+  afterAll(async () => {
+    await client?.close();
+    await server?.close();
+  });
 
+  it("should handle base class methods directly", async () => {
+    const result = await baseClient.baseMethod({ id: 123 });
+    expect(result).toBeDefined();
+    expect(result.id).toBe(123);
+    expect(result.timestamp).toBeDefined();
+  });
 
-    // Testing baseMethod through baseInstance
-    const baseResult = await baseClient.baseMethod({ id: 123 });
-    expect(baseResult).toHaveProperty("id");
-    expect(baseResult).toHaveProperty("timestamp");
-    expect(typeof baseResult.id).toBe("number");
-    expect(baseResult.id).toBe(123)
+  it("should handle inherited base methods from child class", async () => {
+    const result = await childClient.baseMethod({ id: 456 });
+    expect(result).toBeDefined();
+    expect(result.id).toBe(456);
+    expect(result.timestamp).toBeDefined();
+  });
 
-    // Testing baseMethod through childInstance (inherited method)
-    const childBaseResult = await childClient.baseMethod({ id: 456 });
-    expect(childBaseResult).toHaveProperty("id");
-    expect(childBaseResult).toHaveProperty("timestamp");
-    expect(typeof childBaseResult.id).toBe("number");
-    expect(childBaseResult.id).toBe(456)
+  it("should handle child class specific methods", async () => {
+    const result = await childClient.childMethod({ name: "test" });
+    expect(result).toBeDefined();
+    expect(result.name).toBe("test");
+    expect(result.message).toBe("Hello from Child");
+  });
 
-    // Testing childMethod from ChildClass
-    const childMethodResult = await childClient.childMethod({ name: "test" });
-    expect(childMethodResult).toHaveProperty("name");
-    expect(childMethodResult).toHaveProperty("message");
-    expect(typeof childMethodResult.name).toBe("string");
-    expect(childMethodResult.name).toBe("test")
-    expect(childMethodResult.message).toBe("Hello from Child");
-
-    // Testing anotherMethod from AnotherClass
-    const anotherResult = await anotherClient.anotherMethod({ message: "test message" });
-    expect(anotherResult).toHaveProperty("result")
-    expect(anotherResult.result).toBe("test message from Another")
-
+  it("should fail when accessing non-existent methods", async () => {
+    expect('nonExistentMethod' in baseClient).toBe(false);
   });
 
 
-  it("should only accept existing property when using proxy", async () => {
-    const rpcServer = new RPCServer();
-    await rpcServer.start();
+  it("should properly reflect method availability", () => {
+    expect(typeof baseClient.baseMethod).toBe("function");
+    expect(BaseClass.prototype.hasOwnProperty('childMethod')).toBe(false);
+    expect(typeof childClient.baseMethod).toBe("function");
+    expect(typeof childClient.childMethod).toBe("function");
+  });
 
-    // Create instances
-    const childInstance = new ChildClass();
-    // Setup the Server
-    rpcServer.handleRequest(childInstance);
+  it("should handle complex inheritance scenarios", async () => {
+    const baseResult = await childClient.baseMethod({ id: 789 });
+    const childResult = await childClient.childMethod({ name: "test2" });
+    expect(baseResult.id).toBe(789);
+    expect(childResult.name).toBe("test2");
 
-    const rpcClient = new RPCClient()
-    await rpcClient.start();
-    const childClient = rpcClient.createProxy(ChildClass);
+    const [parallelBase, parallelChild] = await Promise.all([
+      childClient.baseMethod({ id: 999 }),
+      childClient.childMethod({ name: "parallel" })
+    ]);
+    expect(parallelBase.id).toBe(999);
+    expect(parallelChild.name).toBe("parallel");
+  });
 
-    // Test with type casting to bypass TypeScript compile-time checks
-    await (childClient as any).unknownMethod({}).catch((e: Error) => {
-      expect(e).toBeInstanceOf(Error);
-    })
+  it("should handle timeouts properly", async () => {
+    const timeoutClient = new RPCClient({
+      url: natsUrl,
+      debug: true,
+      timeout: 300 // Set timeout to 300ms for this test
+    });
+    await timeoutClient.start();
+    const slowProxy = timeoutClient.createProxy(SlowClass);
+    await expect(slowProxy.slowMethod()).rejects.toThrow();
+    await timeoutClient.close();
+  });
 
-    // Testing that proxy only accept known properties
-    await childClient.baseMethod({ id: 123 });
-  })
+  it("should handle errors properly", async () => {
+    const errorProxy = client.createProxy(ErrorClass);
+    try {
+      await errorProxy.errorMethod()
+    } catch (error: any) {
+      expect(error.message).toBe("Test error")
+    }
+  });
 
+
+  it("should handle concurrent requests", async () => {
+    const counterProxy = client.createProxy(CounterClass);
+    const results = await Promise.all([
+      counterProxy.increment(),
+      counterProxy.increment(),
+      counterProxy.increment()
+    ]);
+    expect(results).toEqual([1, 2, 3]);
+  });
+
+  it("should cleanup resources properly", async () => {
+    const testServer = new RPCServer({ url: natsUrl, debug: true });
+    await testServer.start();
+
+    const testClient = new RPCClient({ url: natsUrl, debug: true });
+    await testClient.start();
+
+    expect(testServer.isConnected()).toBe(true);
+    expect(testClient.isConnected()).toBe(true);
+
+    await testServer.close();
+    await testClient.close();
+    expect(testServer.isConnected()).toBe(false);
+    expect(testClient.isConnected()).toBe(false);
+  });
 });

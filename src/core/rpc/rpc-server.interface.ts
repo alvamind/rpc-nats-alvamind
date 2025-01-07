@@ -13,4 +13,5 @@ export interface IRPCServer {
   start(): Promise<void>;
   close(): Promise<void>;
   handleRequest<T extends ClassType>(instance: T): Promise<void>;
+  isConnected(): boolean;
 }
