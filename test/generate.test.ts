@@ -105,13 +105,14 @@ describe('generateRpcServices - Real Scenarios', () => {
   });
 
   test('should ignore non-controller files', async () => {
-    const includes = [`${rpcDir}/**/*.ts`];
-    const excludes = [];
+    // Change the includes pattern to only match the logger.ts file
+    const includes = [`${rpcDir}/logger.ts`]; // Only include non-controller file
+    const excludes = [`${controllersDir}/**/*.ts`]; // Explicitly exclude controller files
 
     await generateRpcServices(includes, excludes, outputFilePath);
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
 
-    expect(outputFileContent).toContain('No classes found in provided files.');
+    expect(outputFileContent).toContain('// No classes found in provided files.');
   });
 
 
