@@ -24,7 +24,7 @@
     "reinstall": "clean && bun install",
     "build": "tsc && tsc -p tsconfig.build.json && chmod +x dist/scripts/*.js",
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
-    "clean": "rimraf dist",
+    "clean": "clean",
     "build:tgz": "bun run build && bun pm pack",
     "test": "bun test test/*.test.ts",
     "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
