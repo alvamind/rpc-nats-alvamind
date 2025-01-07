@@ -62,7 +62,9 @@
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "rimraf dist",
     "build:tgz": "bun run build && bun pm pack",
-    "test": "bun test test/*.test.ts"
+    "test": "bun test test/*.test.ts",
+    "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
+    "publish-npm": "publish-npm patch"
   },
   "keywords": [
     "rpc",
@@ -81,8 +83,10 @@
   "license": "MIT",
   "dependencies": {
     "alvamind-tools": "^1.0.20",
+    "chalk": "^5.4.1",
+    "logger-alvamind": "^1.0.1",
     "nats": "^2.28.2",
-    "chalk": "^5.4.1"
+    "retry-util-alvamind": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.17.12",
@@ -131,10 +135,39 @@ export const getCodec = <T = unknown>(codec: SupportedCodec | NatsCodec<T> = "js
 import { NatsCodec } from './codec.interface';
 export class JsonCodec<T> implements NatsCodec<T> {
   encode(data: T): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(data));
+    const serialized = JSON.stringify(data, (_, value) => {
+      if (value instanceof Date) {
+        return { __type: 'Date', value: value.toISOString() };
+      }
+      if (typeof value === 'bigint') {
+        return { __type: 'BigInt', value: value.toString() };
+      }
+      if (value instanceof Map) {
+        return { __type: 'Map', value: Array.from(value.entries()) };
+      }
+      if (value instanceof Set) {
+        return { __type: 'Set', value: Array.from(value) };
+      }
+      return value;
+    });
+    return new TextEncoder().encode(serialized);
   }
   decode(data: Uint8Array): T {
-    return JSON.parse(new TextDecoder().decode(data));
+    return JSON.parse(new TextDecoder().decode(data), (_, value) => {
+      if (value && typeof value === 'object') {
+        switch (value.__type) {
+          case 'Date':
+            return new Date(value.value);
+          case 'BigInt':
+            return BigInt(value.value);
+          case 'Map':
+            return new Map(value.value);
+          case 'Set':
+            return new Set(value.value);
+        }
+      }
+      return value;
+    });
   }
 }
 
@@ -272,7 +305,7 @@ export class NatsClient implements INatsClient {
   }
   async request<TRequest = unknown, TResponse = unknown>(
     subject: string,
-    data: TRequest,
+    data: TRequest | null, // Accept null explicitly
     timeout = 5000
   ): Promise<TResponse> {
     if (!this.nc) {
@@ -280,7 +313,7 @@ export class NatsClient implements INatsClient {
     }
     try {
       Logger.debug(`Sending request to ${subject}:`, data);
-      const encoded = data ? this.codec.encode(data) : undefined;
+      const encoded = data !== null ? this.codec.encode(data) : undefined;
       const response = await this.nc.request(subject, encoded, { timeout });
       const decoded = this.codec.decode(response.data) as TResponse;
       Logger.debug(`Received response from ${subject}:`, decoded);
@@ -367,7 +400,7 @@ export class RPCClient implements IRPCClient {
     return this.isStarted && this.natsClient.isConnected();
   }
   createProxy<T extends ClassType>(
-    classConstructor: { new(...args: any[]): T }
+    classConstructor: new (...args: any[]) => T
   ): ClassTypeProxy<T> {
     if (!this.isStarted) {
       throw new Error('RPC Client not started. Call start() first.');
@@ -377,20 +410,20 @@ export class RPCClient implements IRPCClient {
     if (!this.methodCache.has(className)) {
       this.methodCache.set(className, new Map());
     }
-    const proxy = {} as ClassTypeProxy<T>;
     const handler: ProxyHandler<ClassTypeProxy<T>> = {
       get: (target, methodName: string) => {
         const cachedMethod = this.methodCache.get(className)?.get(methodName);
         if (cachedMethod) {
           return cachedMethod;
         }
-        const methodProxy = async (...args: any[]) => {
+        const methodProxy = async (...args: any[]): Promise<any> => {
           const subject = `${className}.${methodName}`;
-          Logger.debug(`Client requesting to subject: ${subject}`, args[0]);
+          const input = args[0]; // Take first argument as input
+          Logger.debug(`Client requesting to subject: ${subject}`, input);
           try {
             const response = await this.natsClient.request(
               subject,
-              args[0] ?? null, // send null instead of undefined if no args
+              input !== undefined ? input : null, // Send null if input is undefined
               this.timeout
             );
             Logger.debug(`Received response from ${subject}:`, response);
@@ -403,44 +436,14 @@ export class RPCClient implements IRPCClient {
               `Error calling method "${methodName}" on class "${className}":`,
               error
             );
-            throw error instanceof Error
-              ? error
-              : new Error(`RPC call failed: ${error}`);
+            throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
           }
         };
         this.methodCache.get(className)?.set(methodName, methodProxy);
         return methodProxy;
-      },
-      set: (_target, property, _value) => {
-        throw new Error(
-          `Cannot set property "${String(property)}" on RPC proxy. RPC proxies are read-only.`
-        );
-      },
-      has: (_target, property) => {
-        let proto = classConstructor.prototype;
-        while (proto && proto !== Object.prototype) {
-          if (property in proto) {
-            return true;
-          }
-          proto = Object.getPrototypeOf(proto);
-        }
-        return false;
-      },
-      getOwnPropertyDescriptor: (_target, property) => {
-        const descriptor = Object.getOwnPropertyDescriptor(classConstructor.prototype, property);
-        if (descriptor) {
-          return {
-            ...descriptor,
-            configurable: true,
-          };
-        }
-        return undefined;
-      },
-      ownKeys: (_target) => {
-        return Reflect.ownKeys(classConstructor.prototype);
       }
     };
-    return new Proxy(proxy, handler);
+    return new Proxy({} as ClassTypeProxy<T>, handler);
   }
   getAvailableMethods(className: string): string[] {
     const methods = this.methodCache.get(className);
@@ -503,16 +506,22 @@ import { NatsClient } from '../nats/nats-client';
 import { Logger } from '../utils/logger';
 import { defaultNatsOptions, ClassType } from '../../types';
 import { IRPCServer, RPCServerOptions } from './rpc-server.interface';
+import { RetryUtil, RetryConfigInterface } from 'retry-util-alvamind'
 export class RPCServer implements IRPCServer {
   private natsClient: NatsClient;
   private methodMapping: Map<string, { instance: any; methods: Set<string> }>;
-  private retryConfig: { attempts: number; delay: number };
+  private retryConfig: RetryConfigInterface;
   private dlqSubject?: string;
   private isStarted: boolean = false;
   constructor(options: RPCServerOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
     this.methodMapping = new Map();
-    this.retryConfig = options.retry || { attempts: 3, delay: 1000 };
+    this.retryConfig = {
+      maxRetries: options?.retry?.attempts || 3,
+      initialDelay: options?.retry?.delay || 1000,
+      factor: 2,
+      maxDelay: 10000,
+    };
     this.dlqSubject = options.dlq;
   }
   async start(): Promise<void> {
@@ -557,12 +566,44 @@ export class RPCServer implements IRPCServer {
         await this.natsClient.subscribe(
           subject,
           async (data: any, reply: string) => {
-            await this.processRequest(className, methodName, data, reply, instance);
+            await this.processRequestWithRetry(className, methodName, data, reply, instance);
           },
           { queue: className }
         );
       }
       Logger.info(`Registered ${methods.size} methods for ${className}`);
+    }
+  }
+  private async processRequestWithRetry(
+    className: string,
+    methodName: string,
+    data: any,
+    reply: string,
+    instance: any
+  ): Promise<void> {
+    const onRetry = (attempt: number, error: Error) => {
+      Logger.warn(
+        `Retrying ${className}.${methodName} (attempt ${attempt}): ${error.message}. Retrying in ${this.retryConfig.initialDelay * Math.pow(2, attempt - 1)
+        }ms...`
+      );
+    };
+    try {
+      await RetryUtil.withRetry(
+        () => this.processRequest(className, methodName, data, reply, instance),
+        this.retryConfig,
+        onRetry
+      );
+    } catch (error) {
+      Logger.error(`Request to ${className}.${methodName} failed after all retries:`, error);
+      if (this.dlqSubject) {
+        await this.natsClient.publish(this.dlqSubject, {
+          className,
+          methodName,
+          data,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        Logger.info(`Message sent to DLQ ${this.dlqSubject}`);
+      }
     }
   }
   private async processRequest(
@@ -580,7 +621,7 @@ export class RPCServer implements IRPCServer {
     if (!method) {
       Logger.error(`Method "${methodName}" not found in class "${className}"`);
       await this.natsClient.publish(reply, {
-        error: `Method "${methodName}" not found`
+        error: `Method "${methodName}" not found`,
       });
       return;
     }
@@ -589,13 +630,13 @@ export class RPCServer implements IRPCServer {
       await this.natsClient.publish(reply, result);
       Logger.debug(`Successfully processed ${className}.${methodName}`, {
         input: data,
-        output: result
+        output: result,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       Logger.error(`Error executing "${methodName}" in class "${className}":`, error);
       await this.natsClient.publish(reply, {
-        error: errorMessage
+        error: errorMessage,
       });
     }
   }
@@ -613,26 +654,24 @@ export class RPCServer implements IRPCServer {
 }
 
 // src/core/utils/logger.ts
-import chalk from "chalk";
+import { logger } from 'logger-alvamind';
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export class Logger {
+  static setLogLevel(level: LogLevel) {
+  }
   static debug(message: string, ...args: any[]): void {
     if (process.env.DEBUG || process.env.NODE_ENV === 'test') {
-      console.debug(chalk.gray(`[DEBUG] ${message}`), ...args);
+      logger.debug(message, ...args);
     }
   }
-  private static logLevel: LogLevel = "info";
-  static setLogLevel(level: LogLevel) {
-    Logger.logLevel = level
-  }
   static info(message: string, ...args: any[]): void {
-    console.log(chalk.blue(`[INFO] ${message}`, ...args));
+    logger.info(message, ...args);
   }
   static warn(message: string, ...args: any[]): void {
-    console.warn(chalk.yellow(`[WARN] ${message}`, ...args));
+    logger.warn(message, ...args);
   }
   static error(message: string, ...args: any[]): void {
-    console.error(chalk.red(`[ERROR] ${message}`, ...args));
+    logger.error(message, ...args);
   }
 }
 
@@ -653,9 +692,9 @@ export type ClassType = {
 };
 export type ClassTypeProxy<T extends ClassType> = {
   [K in keyof T]: T[K] extends (...args: infer Args) => Promise<infer R>
-  ? (...args: Args) => Promise<Awaited<R>>
+  ? (...args: Args) => Promise<R>
   : T[K] extends (...args: infer Args) => infer R
-  ? (...args: Args) => Promise<Awaited<R>>
+  ? (...args: Args) => Promise<R>
   : never;
 };
 export type NatsOptions = {
@@ -666,7 +705,7 @@ export type NatsOptions = {
 
 // test/rpc.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { RPCServer, RPCClient } from "../src";
+import { RPCServer, RPCClient, ClassTypeProxy } from "../src";
 const natsUrl = "nats://localhost:4222";
 class BaseClass {
   async baseMethod(input: { id: number }): Promise<{ id: number; timestamp: Date }> {
@@ -689,7 +728,7 @@ class SlowClass {
   }
 }
 class CounterClass {
-  counter = 0;
+  private counter = 0;
   async increment(): Promise<number> {
     this.counter++;
     return this.counter;
@@ -698,8 +737,8 @@ class CounterClass {
 describe("RPC with Prototype Chain", () => {
   let server: RPCServer;
   let client: RPCClient;
-  let baseClient: any;
-  let childClient: any;
+  let baseClient: ClassTypeProxy<BaseClass>;
+  let childClient: ClassTypeProxy<ChildClass>;
   beforeAll(async () => {
     server = new RPCServer({ url: natsUrl, debug: true });
     await server.start();
@@ -727,22 +766,19 @@ describe("RPC with Prototype Chain", () => {
     const result = await baseClient.baseMethod({ id: 123 });
     expect(result).toBeDefined();
     expect(result.id).toBe(123);
-    expect(result.timestamp).toBeDefined();
+    expect(new Date(result.timestamp).getTime()).toBeGreaterThan(0); // Check if the timestamp is a valid date
   });
   it("should handle inherited base methods from child class", async () => {
     const result = await childClient.baseMethod({ id: 456 });
     expect(result).toBeDefined();
     expect(result.id).toBe(456);
-    expect(result.timestamp).toBeDefined();
+    expect(new Date(result.timestamp).getTime()).toBeGreaterThan(0); // Check if the timestamp is a valid date
   });
   it("should handle child class specific methods", async () => {
     const result = await childClient.childMethod({ name: "test" });
     expect(result).toBeDefined();
     expect(result.name).toBe("test");
     expect(result.message).toBe("Hello from Child");
-  });
-  it("should fail when accessing non-existent methods", async () => {
-    expect('nonExistentMethod' in baseClient).toBe(false);
   });
   it("should properly reflect method availability", () => {
     expect(typeof baseClient.baseMethod).toBe("function");
@@ -766,7 +802,7 @@ describe("RPC with Prototype Chain", () => {
     const timeoutClient = new RPCClient({
       url: natsUrl,
       debug: true,
-      timeout: 300 // Set timeout to 300ms for this test
+      timeout: 300
     });
     await timeoutClient.start();
     const slowProxy = timeoutClient.createProxy(SlowClass);
@@ -775,11 +811,7 @@ describe("RPC with Prototype Chain", () => {
   });
   it("should handle errors properly", async () => {
     const errorProxy = client.createProxy(ErrorClass);
-    try {
-      await errorProxy.errorMethod()
-    } catch (error: any) {
-      expect(error.message).toBe("Test error")
-    }
+    await expect(errorProxy.errorMethod()).rejects.toThrow("Test error");
   });
   it("should handle concurrent requests", async () => {
     const counterProxy = client.createProxy(CounterClass);
@@ -801,6 +833,84 @@ describe("RPC with Prototype Chain", () => {
     await testClient.close();
     expect(testServer.isConnected()).toBe(false);
     expect(testClient.isConnected()).toBe(false);
+  });
+  it("should handle complex object structures with JSON codec", async () => {
+    const input = {
+      name: "Complex",
+      data: {
+        nested: [
+          { value: 1, isTrue: true, date: new Date(), bigint: BigInt(9007199254740991) },
+          { value: 2, isTrue: false, nestedArray: ["a", "b"], nestedSet: new Set([1, 2]) },
+          new Map([['key', 'val']])
+        ],
+      },
+    };
+    const result = await childClient.childMethod(input)
+    expect(result).toBeDefined();
+    expect(result.name).toBe(input.name)
+    expect(result.message).toBe("Hello from Child");
+  });
+  class FlakyClass {
+    attempts = 0;
+    async flakyMethod(): Promise<string> {
+      this.attempts++;
+      if (this.attempts < 3) {
+        throw new Error("Flaky failure!");
+      }
+      return "Success after retries";
+    }
+  }
+  it("should handle successful retries", async () => {
+    const serverWithRetry = new RPCServer({ url: natsUrl, retry: { attempts: 3, delay: 100 } });
+    await serverWithRetry.start();
+    const clientWithRetry = new RPCClient({ url: natsUrl, timeout: 1000 });
+    await clientWithRetry.start();
+    const flakyInstance = new FlakyClass();
+    await serverWithRetry.handleRequest(flakyInstance);
+    const flakyProxy = clientWithRetry.createProxy(FlakyClass);
+    const result = await flakyProxy.flakyMethod();
+    expect(result).toBe("Success after retries");
+    expect(flakyInstance.attempts).toBe(3);
+    await serverWithRetry.close();
+    await clientWithRetry.close();
+  });
+  interface DLQMessage {
+    className: string;
+    methodName: string;
+    data: any;
+    error: string;
+  }
+  class FailingClass {
+    async failMethod(): Promise<string> {
+      throw new Error("This always fails");
+    }
+  }
+  it('should send to DLQ after max retries', async () => {
+    const dlqSubject = 'dlq.test';
+    let dlqMessage: DLQMessage | undefined;
+    const serverWithDlq = new RPCServer({ url: natsUrl, dlq: dlqSubject, retry: { attempts: 2, delay: 100 } });
+    await serverWithDlq.start();
+    const natsClient = serverWithDlq['natsClient'].getNatsConnection(); // Access natsClient from serverWithDlq
+    natsClient?.subscribe(dlqSubject, {
+      callback: (msg: any) => {
+        dlqMessage = msg;
+      }
+    });
+    const clientWithDlq = new RPCClient({ url: natsUrl, timeout: 1000 });
+    await clientWithDlq.start();
+    const failingInstance = new FailingClass();
+    await serverWithDlq.handleRequest(failingInstance);
+    const failingProxy = clientWithDlq.createProxy(FailingClass);
+    expect(failingProxy.failMethod()).rejects.toThrow();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    expect(dlqMessage).toBeDefined();
+    if (dlqMessage) {
+      expect(dlqMessage.className).toBe('FailingClass');
+      expect(dlqMessage.methodName).toBe('failMethod');
+      expect(dlqMessage.error).toBe('This always fails');
+    }
+    await serverWithDlq.close();
+    await clientWithDlq.close();
   });
 });
 

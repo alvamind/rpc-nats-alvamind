@@ -29,7 +29,9 @@
     "source": "generate-source --exclude=**/dist/**,.gitignore,bun.lockb --output=source.md",
     "clean": "rimraf dist",
     "build:tgz": "bun run build && bun pm pack",
-    "test": "bun test test/*.test.ts"
+    "test": "bun test test/*.test.ts",
+    "split-code": "split-code source=combined.ts markers=src/,lib/ outputDir=./output",
+    "publish-npm": "publish-npm patch"
   },
   "keywords": [
     "rpc",
@@ -48,8 +50,10 @@
   "license": "MIT",
   "dependencies": {
     "alvamind-tools": "^1.0.20",
+    "chalk": "^5.4.1",
+    "logger-alvamind": "^1.0.1",
     "nats": "^2.28.2",
-    "chalk": "^5.4.1"
+    "retry-util-alvamind": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.17.12",

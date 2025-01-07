@@ -1,26 +1,22 @@
-import chalk from "chalk";
-
+import { logger } from 'logger-alvamind';
 export type LogLevel = "debug" | "info" | "warn" | "error";
-
 export class Logger {
+  static setLogLevel(level: LogLevel) {
+    // No need to set log level, logger-alvamind already handles it
+    // Logger.logLevel = level
+  }
   static debug(message: string, ...args: any[]): void {
     if (process.env.DEBUG || process.env.NODE_ENV === 'test') {
-      console.debug(chalk.gray(`[DEBUG] ${message}`), ...args);
+      logger.debug(message, ...args);
     }
   }
-  private static logLevel: LogLevel = "info";
-
-  static setLogLevel(level: LogLevel) {
-    Logger.logLevel = level
-  }
-
   static info(message: string, ...args: any[]): void {
-    console.log(chalk.blue(`[INFO] ${message}`, ...args));
+    logger.info(message, ...args);
   }
   static warn(message: string, ...args: any[]): void {
-    console.warn(chalk.yellow(`[WARN] ${message}`, ...args));
+    logger.warn(message, ...args);
   }
   static error(message: string, ...args: any[]): void {
-    console.error(chalk.red(`[ERROR] ${message}`, ...args));
+    logger.error(message, ...args);
   }
 }

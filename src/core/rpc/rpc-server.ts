@@ -2,18 +2,24 @@ import { NatsClient } from '../nats/nats-client';
 import { Logger } from '../utils/logger';
 import { defaultNatsOptions, ClassType } from '../../types';
 import { IRPCServer, RPCServerOptions } from './rpc-server.interface';
+import { RetryUtil, RetryConfigInterface } from 'retry-util-alvamind'
 
 export class RPCServer implements IRPCServer {
   private natsClient: NatsClient;
   private methodMapping: Map<string, { instance: any; methods: Set<string> }>;
-  private retryConfig: { attempts: number; delay: number };
+  private retryConfig: RetryConfigInterface;
   private dlqSubject?: string;
   private isStarted: boolean = false;
 
   constructor(options: RPCServerOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
     this.methodMapping = new Map();
-    this.retryConfig = options.retry || { attempts: 3, delay: 1000 };
+    this.retryConfig = {
+      maxRetries: options?.retry?.attempts || 3,
+      initialDelay: options?.retry?.delay || 1000,
+      factor: 2,
+      maxDelay: 10000,
+    };
     this.dlqSubject = options.dlq;
   }
 
@@ -36,7 +42,6 @@ export class RPCServer implements IRPCServer {
   private getMethodsFromPrototype(obj: any): string[] {
     const methods: string[] = [];
     let current = obj;
-
     do {
       Object.entries(Object.getOwnPropertyDescriptors(current))
         .filter(([_, descriptor]) => typeof descriptor.value === 'function')
@@ -46,7 +51,6 @@ export class RPCServer implements IRPCServer {
           }
         });
     } while ((current = Object.getPrototypeOf(current)) && current !== Object.prototype);
-
     return [...new Set(methods)]; // Remove duplicates
   }
 
@@ -54,69 +58,100 @@ export class RPCServer implements IRPCServer {
     if (!this.isStarted) {
       throw new Error('RPC Server not started. Call start() first.');
     }
-
     const className = instance.constructor.name;
     Logger.debug(`Registering handlers for class: ${className}`);
-
     if (!this.methodMapping.has(className)) {
       const methods = new Set(this.getMethodsFromPrototype(instance));
       this.methodMapping.set(className, { instance, methods });
-
       for (const methodName of methods) {
         const subject = `${className}.${methodName}`;
         Logger.debug(`Registering handler for ${subject}`);
-
         await this.natsClient.subscribe(
           subject,
           async (data: any, reply: string) => {
-            await this.processRequest(className, methodName, data, reply, instance);
+            await this.processRequestWithRetry(className, methodName, data, reply, instance);
           },
           { queue: className }
         );
       }
-
       Logger.info(`Registered ${methods.size} methods for ${className}`);
     }
   }
 
-  // src/core/rpc/rpc-server.ts
-  private async processRequest(
+  private async processRequestWithRetry(
     className: string,
     methodName: string,
     data: any,
     reply: string,
     instance: any
   ): Promise<void> {
-    if (!reply) {
-      Logger.debug(`Ignoring request without reply subject for ${className}.${methodName}`);
-      return;
-    }
-
-    const method = instance[methodName];
-    if (!method) {
-      Logger.error(`Method "${methodName}" not found in class "${className}"`);
-      await this.natsClient.publish(reply, {
-        error: `Method "${methodName}" not found`
-      });
-      return;
-    }
+    const onRetry = (attempt: number, error: Error) => {
+      Logger.warn(
+        `Retrying ${className}.${methodName} (attempt ${attempt}): ${error.message}. Retrying in ${this.retryConfig.initialDelay * Math.pow(2, attempt - 1)
+        }ms...`
+      );
+    };
 
     try {
-      const result = await method.call(instance, data);
-      await this.natsClient.publish(reply, result);
-      Logger.debug(`Successfully processed ${className}.${methodName}`, {
-        input: data,
-        output: result
-      });
+      const result = await RetryUtil.withRetry(
+        async () => {
+          const response = await this.processRequest(className, methodName, data, reply, instance);
+          // If processRequest throws, retry will happen
+          return response;
+        },
+        this.retryConfig,
+        onRetry
+      );
+
+      if (result) {
+        await this.natsClient.publish(reply, result);
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      Logger.error(`Error executing "${methodName}" in class "${className}":`, error);
+      Logger.error(`Request to ${className}.${methodName} failed after all retries:`, error);
+
+      if (this.dlqSubject) {
+        const dlqMessage = {
+          className,
+          methodName,
+          data,
+          error: error instanceof Error ? error.message : String(error)
+        };
+
+        await this.natsClient.publish(this.dlqSubject, dlqMessage);
+        Logger.info(`Message sent to DLQ ${this.dlqSubject}`);
+      }
+
+      // Always send error response back to client
       await this.natsClient.publish(reply, {
-        error: errorMessage
+        error: error instanceof Error ? error.message : String(error)
       });
     }
   }
 
+  private async processRequest(
+    className: string,
+    methodName: string,
+    data: any,
+    reply: string,
+    instance: any
+  ): Promise<any> {
+    const method = instance[methodName];
+    if (!method) {
+      throw new Error(`Method "${methodName}" not found`);
+    }
+
+    try {
+      const result = await method.call(instance, data);
+      Logger.debug(`Successfully processed ${className}.${methodName}`, {
+        input: data,
+        output: result
+      });
+      return result;
+    } catch (error) {
+      Logger.error(`Error executing "${methodName}" in class "${className}":`, error);
+      throw error;
+    }
+  }
 
   public getRegisteredMethods(): Map<string, Set<string>> {
     const result = new Map<string, Set<string>>();
