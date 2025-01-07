@@ -19,6 +19,7 @@ export class NatsClient implements INatsClient {
   constructor(options: NatsOptions) {
     this.options = options;
     this.codec = getCodec(options?.codec);
+    Logger.setLogLevel(options?.logLevel ?? defaultNatsOptions.logLevel);
     if (options?.debug) {
       Logger.setLogLevel("debug");
     }

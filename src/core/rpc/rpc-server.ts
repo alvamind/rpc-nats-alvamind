@@ -10,7 +10,6 @@ export class RPCServer implements IRPCServer {
   private retryConfig: RetryConfigInterface;
   private dlqSubject?: string;
   private isStarted: boolean = false;
-
   constructor(options: RPCServerOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
     this.methodMapping = new Map();
@@ -21,6 +20,7 @@ export class RPCServer implements IRPCServer {
       maxDelay: 10000,
     };
     this.dlqSubject = options.dlq;
+    Logger.setLogLevel(options?.logLevel ?? defaultNatsOptions.logLevel);
   }
 
   async start(): Promise<void> {

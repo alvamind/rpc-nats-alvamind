@@ -1,5 +1,6 @@
 import { NatsOptions } from '../../types';
 import { ClassType } from '../../types/index';
+import { LogLevel } from '../utils/logger';
 
 export type RPCServerOptions = NatsOptions & {
   retry?: {
@@ -7,6 +8,7 @@ export type RPCServerOptions = NatsOptions & {
     delay: number;
   };
   dlq?: string;
+  logLevel?: LogLevel
 };
 
 export interface IRPCServer {

@@ -12,6 +12,7 @@ export class RPCClient implements IRPCClient {
   constructor(options: RPCClientOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
     this.timeout = options.timeout || 5000; // Default 5 second timeout
+    Logger.setLogLevel(options?.logLevel ?? defaultNatsOptions.logLevel);
   }
 
   async start(): Promise<void> {
