@@ -1,3 +1,5 @@
+#!/usr/bin / env node
+
 // rpc-nats-alvamind/src/generate-services.ts
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
