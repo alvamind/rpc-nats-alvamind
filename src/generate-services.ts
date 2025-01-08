@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// rpc-nats-alvamind/src/generate-services.ts
+// src/generate-services.ts
+
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { glob } from 'glob';
@@ -10,20 +11,13 @@ import chokidar from 'chokidar';
 import { debounce } from 'lodash';
 import { Project, Node, SourceFile } from 'ts-morph';
 import { minimatch } from 'minimatch';
+import { Config } from './types'; // Import Config interface
 
 // --- Interfaces ---
 interface ClassInfo {
   name: string;
   path: string;
   methods: string[];
-}
-
-interface Config {
-  includes: string[];
-  excludes: string[];
-  output: string;
-  watch: boolean;
-  logLevel: string;
 }
 
 // --- Logging ---
@@ -58,14 +52,16 @@ const parseArgs = (): Config => {
       yargs
         .option('includes', {
           type: 'string',
-          describe: 'Glob patterns for including files',
-          demandOption: true,
+          describe: 'Glob patterns or direct paths for including files',
           array: true,
-          coerce: (arg: string | string[]) => (typeof arg === 'string' ? arg.split(/[,\s]+/).filter(Boolean) : arg),
+          coerce: (arg: string | string[] | undefined) => {
+            if (!arg) return undefined;
+            return typeof arg === 'string' ? arg.split(/[,\s]+/).filter(Boolean) : arg;
+          },
         })
         .option('excludes', {
           type: 'string',
-          describe: 'Glob patterns for excluding files',
+          describe: 'Glob patterns or direct paths for excluding files',
           default: [],
           array: true,
           coerce: (arg: string | string[]) => (typeof arg === 'string' ? arg.split(/[,\s]+/).filter(Boolean) : arg),
@@ -98,19 +94,23 @@ const parseArgs = (): Config => {
 
 // --- File System Operations ---
 class FileSystem {
-  async ensureDir(dirPath: string): Promise<void> {
+  public async ensureDir(dirPath: string): Promise<void> {
     await fs.mkdir(dirPath, { recursive: true });
   }
 
-  async writeFile(filePath: string, content: string): Promise<void> {
+  public async writeFile(filePath: string, content: string): Promise<void> {
     await fs.writeFile(filePath, content, 'utf-8');
   }
 
-  async findFiles(includes: string[], excludes: string[]): Promise<string[]> {
-    const allFiles = await includes.reduce<Promise<string[]>>(async (acc, include) => {
+  public async findFiles(includes: string[] | undefined, excludes: string[]): Promise<string[]> {
+    const defaultIncludes = ['**/*']; // all files recursive
+    const effectiveIncludes = includes && includes.length > 0 ? includes : defaultIncludes;
+    const defaultExcludes = ['**/node_modules/**', '**/dist/**', '**/build/**'];
+
+    const allFiles = await effectiveIncludes.reduce<Promise<string[]>>(async (acc, include) => {
       const accumulated = await acc;
       const matchedFiles = await glob(include, {
-        ignore: excludes,
+        ignore: [...defaultExcludes, ...excludes],
         nodir: true,
       });
       return [...accumulated, ...matchedFiles];
@@ -134,13 +134,18 @@ class CodeAnalyzer {
     });
   }
 
-  async analyzeClasses(files: string[], includes: string[], excludes: string[]): Promise<ClassInfo[]> {
+  async analyzeClasses(files: string[], includes: string[] | undefined, excludes: string[]): Promise<ClassInfo[]> {
     this.project.addSourceFilesAtPaths(files);
 
     return this.project.getSourceFiles().reduce<ClassInfo[]>((acc, sourceFile) => {
       const filePath = sourceFile.getFilePath();
-      const isIncluded = includes.some((pattern) => glob.sync(pattern).includes(filePath));
       const isExcluded = excludes.some((pattern) => glob.sync(pattern).includes(filePath));
+      const effectiveIncludes = includes || [];
+      const isIncluded =
+        effectiveIncludes.length === 0
+          ? true
+          : effectiveIncludes.some((pattern) => glob.sync(pattern).includes(filePath));
+
       if (!isIncluded || isExcluded) {
         this.logger.debug('Skipping source file due to include/exclude:', filePath);
         return acc;
@@ -270,8 +275,7 @@ export class RPCServices {
 }
 
 // --- Main ---
-async function main() {
-  const config = parseArgs();
+export async function main(config: Config) {
   const logger = new Logger(config.logLevel);
   logger.info('Configuration: ', config);
 
@@ -294,8 +298,8 @@ async function main() {
 
       logger.info(`Files Scanned: ${files.length}`);
       logger.debug('Matched files:', files);
-
-      const classes = await codeAnalyzer.analyzeClasses(files, config.includes, config.excludes);
+      const includes = config.includes || []; // Use empty array if undefined
+      const classes = await codeAnalyzer.analyzeClasses(files, includes, config.excludes);
       logger.info(`Classes detected: ${classes.length}`);
       logger.debug('Detected classes:', classes);
 
@@ -313,7 +317,7 @@ async function main() {
   await generate();
 
   if (config.watch) {
-    const watcher = chokidar.watch(config.includes, {
+    const watcher = chokidar.watch(config.includes || ['**/*'], {
       ignored: config.excludes,
       ignoreInitial: true,
     });
@@ -329,4 +333,8 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+// this is to make it executable
+if (require.main === module) {
+  const config = parseArgs();
+  main(config).catch(console.error);
+}

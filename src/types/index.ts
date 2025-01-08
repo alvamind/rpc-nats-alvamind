@@ -21,3 +21,10 @@ export type NatsOptions = {
   debug?: boolean
   logLevel?: LogLevel
 };
+export interface Config {
+  includes?: string[];
+  excludes: string[];
+  output: string;
+  watch: boolean;
+  logLevel: string;
+}

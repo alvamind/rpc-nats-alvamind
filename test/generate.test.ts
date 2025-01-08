@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { main } from '../src/generate-services'; // Import the main function
+import { Config } from '../src/types';
 
 const execAsync = promisify(exec);
 
@@ -13,6 +15,15 @@ let outputFilePath: string;
 let rpcDir: string;
 let sourceDir: string;
 let modelsDir: string;
+
+// Configuration for run mode
+type RunMode = 'cli' | 'direct';
+
+const runConfig: { runMode: RunMode } = {
+  // runMode: 'cli', // Default to CLI mode
+  runMode: 'cli', //Default to Direct mode
+};
+
 
 const createTestFiles = async () => {
   await fs.mkdir(sourceDir, { recursive: true });
@@ -72,11 +83,19 @@ const deleteTestFiles = async () => {
   await fs.rm(testDir, { recursive: true, force: true });
 };
 
-const runCli = async (options: { includes: string[], excludes?: string[], output?: string }) => {
-  const { includes, excludes = [], output = outputFilePath } = options;
-  const includesArg = includes.map(include => `--includes="${include}"`).join(' ');
-  const excludesArg = excludes.map(exclude => `--excludes="${exclude}"`).join(' ');
 
+const runGenerator = async (options: { includes?: string[], excludes?: string[], output?: string }) => {
+  if (runConfig.runMode === 'cli') {
+    return await runCli(options);
+  } else {
+    return await runDirect(options);
+  }
+};
+
+const runCli = async (options: { includes?: string[], excludes?: string[], output?: string }) => {
+  const { includes, excludes = [], output = outputFilePath } = options;
+  const includesArg = includes ? includes.map(include => `--includes="${include}"`).join(' ') : '';
+  const excludesArg = excludes.map(exclude => `--excludes="${exclude}"`).join(' ');
   const command = `bun src/generate-services.ts generate ${includesArg} ${excludesArg} --output="${output}" --logLevel="debug"`;
   try {
     const { stdout, stderr } = await execAsync(command);
@@ -89,6 +108,26 @@ const runCli = async (options: { includes: string[], excludes?: string[], output
     throw error;
   }
 };
+
+
+const runDirect = async (options: { includes?: string[], excludes?: string[], output?: string }) => {
+  const { includes, excludes = [], output = outputFilePath } = options;
+  const config: Config = {
+    includes,
+    excludes,
+    output,
+    watch: false,
+    logLevel: 'info',
+  };
+  try {
+    await main(config)
+    return { stdout: 'Direct run success', stderr: '' };
+  } catch (error: any) {
+    console.error('Direct Execution Error:', error.message);
+    throw error
+  }
+}
+
 
 describe('generateRpcServices - Real Scenarios', () => {
   beforeEach(async () => {
@@ -105,8 +144,37 @@ describe('generateRpcServices - Real Scenarios', () => {
     await deleteTestFiles();
   });
 
+  it('should handle default includes (whole project) when includes is empty', async () => {
+    await runGenerator({
+      includes: undefined,
+    });
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).toContain('AuthController');
+    expect(outputFileContent).not.toContain('ExcludedController');
+  });
+
+  it('should handle direct path includes correctly', async () => {
+    await runGenerator({
+      includes: [path.join(sourceDir, 'user.controller.ts')],
+    });
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).not.toContain('AuthController');
+  });
+
+  it('should handle direct path excludes correctly', async () => {
+    await runGenerator({
+      includes: [`${sourceDir}/**/*.ts`],
+      excludes: [path.join(sourceDir, 'auth.controller.ts')],
+    });
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).not.toContain('AuthController');
+  });
+
   it('should generate rpc-services.ts correctly with multiple controllers and complex paths', async () => {
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -121,7 +189,7 @@ describe('generateRpcServices - Real Scenarios', () => {
   });
 
   it('should handle no controller files found', async () => {
-    await runCli({
+    await runGenerator({
       includes: [`${testDir}/non-existent/**/*.ts`],
     });
 
@@ -139,7 +207,7 @@ describe('generateRpcServices - Real Scenarios', () => {
                 }
             }
         `);
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -178,7 +246,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
           `
     );
 
-    await runCli({
+    await runGenerator({
       includes: [
         `${sourceDir}/**/*.ts`,
         `${testDir}/other-controllers/**/*.ts`
@@ -191,7 +259,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
   });
 
   it('should handle excludes patterns correctly', async () => {
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
       excludes: [`${sourceDir}/**/auth.controller.ts`],
     });
@@ -217,7 +285,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/multiple.controller.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -237,7 +305,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
           // Missing implementation and closing brace
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -252,7 +320,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
       export class EmptyController {}
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/empty.controller.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -261,7 +329,7 @@ describe('generateRpcServices - Edge Cases and Error Handling', () => {
 
   it('should handle output to non-existent directory', async () => {
     const newOutputPath = path.join(testDir, 'new-dir', 'rpc-services.ts');
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
       output: newOutputPath,
     });
@@ -298,7 +366,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${specialPath}/**/*.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -321,7 +389,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       export { API };
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/namespace.controller.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -342,7 +410,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.controller.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -362,7 +430,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.controller.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -392,7 +460,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -418,7 +486,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/exports.controller.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -445,7 +513,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -476,7 +544,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -500,7 +568,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/generic.controller.ts`],
     });
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
@@ -531,7 +599,7 @@ describe('generateRpcServices - Advanced Edge Cases', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -564,7 +632,7 @@ describe('generateRpcServices - Different Naming Patterns', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.handler.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -580,7 +648,7 @@ describe('generateRpcServices - Different Naming Patterns', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/*.service.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
@@ -604,7 +672,7 @@ describe('generateRpcServices - Different Naming Patterns', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [
         `${sourceDir}/**/*.handler.ts`,
         `${sourceDir}/**/*.service.ts`
@@ -624,7 +692,7 @@ describe('generateRpcServices - Different Naming Patterns', () => {
       }
       `
     );
-    await runCli({
+    await runGenerator({
       includes: [`${sourceDir}/**/custom-*.ts`],
     });
     const output = await fs.readFile(outputFilePath, 'utf-8');
