@@ -84,15 +84,20 @@ export class RPCServices {
     project.addSourceFilesAtPaths(files);
 
     classes = project.getSourceFiles().reduce<{ name: string; path: string; methods: string[] }[]>((acc, sourceFile) => {
+      console.debug('Processing source file:', sourceFile.getFilePath());
       const exportedDeclarations = sourceFile.getExportedDeclarations();
+      console.debug('Exported declarations:', exportedDeclarations.keys());
+
       const exportedClasses: { name: string; path: string; methods: string[] }[] = [];
 
       exportedDeclarations.forEach((declarations, exportName) => {
         declarations.forEach(declaration => {
           let classDecl: Node | undefined = declaration;
+          let isDefaultExport = false;
 
           // Handle default exports
           if (Node.isExportAssignment(declaration)) {
+            isDefaultExport = true;
             const expression = declaration.getExpression();
             if (Node.isClassExpression(expression) || Node.isIdentifier(expression)) {
               classDecl = Node.isIdentifier(expression)
@@ -100,24 +105,38 @@ export class RPCServices {
                 : expression;
             }
           }
-
+          console.debug(`  Checking declaration: ${declaration.getKindName()} - ${declaration.getText()} `)
           // Handle class declarations
           if (Node.isClassDeclaration(classDecl) && !classDecl.isAbstract()) {
-            const methods = classDecl.getMethods()
-              .map(m => m.getName());
-
-            const className = classDecl.getName() ||
-              (exportName === 'default' ? 'DefaultController' : exportName);
-
-            exportedClasses.push({
-              name: className,
-              path: sourceFile.getFilePath(),
-              methods
-            });
+            // Check if the class is exported
+            if (classDecl.isExported() || isDefaultExport) {
+              //Check if the class is declared in the current file
+              if (classDecl.getSourceFile() === sourceFile) {
+                const methods = classDecl.getMethods()
+                  .map(m => m.getName());
+                const className = classDecl.getName() ||
+                  (exportName === 'default' ? 'DefaultController' : exportName);
+                console.debug(`  Found exported class: ${className} in ${sourceFile.getFilePath()}`);
+                exportedClasses.push({
+                  name: className,
+                  path: sourceFile.getFilePath(),
+                  methods
+                });
+              } else {
+                console.debug(`  Ignored class from another file: ${classDecl.getName()} in ${sourceFile.getFilePath()}`)
+              }
+            } else {
+              if (Node.isClassDeclaration(classDecl)) {
+                console.debug(`  Ignored non-exported class: ${classDecl.getName()} in ${sourceFile.getFilePath()}`);
+              }
+            }
+          } else {
+            if (classDecl) {
+              console.debug(`  Ignored non-class declaration: ${classDecl.getKindName()} in ${sourceFile.getFilePath()}`);
+            }
           }
         });
       });
-
       return [...acc, ...exportedClasses];
     }, []);
 
