@@ -8,6 +8,7 @@ import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
 import { Project, Node, SourceFile } from 'ts-morph';
+import { minimatch } from 'minimatch';
 
 // --- Interfaces ---
 interface ClassInfo {
@@ -105,11 +106,18 @@ class FileSystem {
   }
 
   async findFiles(includes: string[], excludes: string[]): Promise<string[]> {
-    return includes.reduce<Promise<string[]>>(async (acc, include) => {
+    const allFiles = await includes.reduce<Promise<string[]>>(async (acc, include) => {
       const accumulated = await acc;
-      const matchedFiles = await glob(include, { ignore: excludes });
+      const matchedFiles = await glob(include, {
+        ignore: excludes,
+        nodir: true,
+      });
       return [...accumulated, ...matchedFiles];
     }, Promise.resolve([]));
+
+    const excludePatterns = excludes.flatMap((pattern) => glob.sync(pattern));
+
+    return [...new Set(allFiles)].filter((file) => !excludePatterns.some((pattern) => minimatch(file, pattern)));
   }
 }
 
@@ -125,22 +133,25 @@ class CodeAnalyzer {
     });
   }
 
-  async analyzeClasses(files: string[], includes: string[]): Promise<ClassInfo[]> {
+  async analyzeClasses(files: string[], includes: string[], excludes: string[]): Promise<ClassInfo[]> {
     this.project.addSourceFilesAtPaths(files);
+
     return this.project.getSourceFiles().reduce<ClassInfo[]>((acc, sourceFile) => {
       const filePath = sourceFile.getFilePath();
       const isIncluded = includes.some((pattern) => glob.sync(pattern).includes(filePath));
-
-      if (!isIncluded) {
+      const isExcluded = excludes.some((pattern) => glob.sync(pattern).includes(filePath));
+      if (!isIncluded || isExcluded) {
+        this.logger.debug('Skipping source file due to include/exclude:', filePath);
         return acc;
       }
+
       this.logger.debug('Processing source file:', filePath);
-      const exportedClasses = this.extractExportedClasses(sourceFile, includes);
+      const exportedClasses = this.extractExportedClasses(sourceFile);
       return [...acc, ...exportedClasses];
     }, []);
   }
 
-  private extractExportedClasses(sourceFile: SourceFile, _includes: string[]): ClassInfo[] {
+  private extractExportedClasses(sourceFile: SourceFile): ClassInfo[] {
     const exportedDeclarations = sourceFile.getExportedDeclarations();
     this.logger.debug('Exported declarations:', exportedDeclarations.keys());
 
@@ -283,7 +294,7 @@ async function main() {
       logger.info(`Files Scanned: ${files.length}`);
       logger.debug('Matched files:', files);
 
-      const classes = await codeAnalyzer.analyzeClasses(files, config.includes);
+      const classes = await codeAnalyzer.analyzeClasses(files, config.includes, config.excludes);
       logger.info(`Classes detected: ${classes.length}`);
       logger.debug('Detected classes:', classes);
 
