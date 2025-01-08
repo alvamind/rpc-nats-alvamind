@@ -10,7 +10,7 @@ export class Logger {
   }
 
   static debug(message: string, ...args: any[]): void {
-    if (Logger.logLevel === 'debug' && (process.env.DEBUG || process.env.NODE_ENV === 'test')) {
+    if (Logger.logLevel === 'debug' && (process.env['DEBUG'] || process.env.NODE_ENV === 'test')) {
       logger.debug(message, ...args);
     }
   }

@@ -54,10 +54,10 @@ export class RPCClient implements IRPCClient {
     if (!this.methodCache.has(className)) {
       this.methodCache.set(className, new Map());
     }
-
     const handler: ProxyHandler<ClassTypeProxy<T>> = {
-      get: (target, methodName: string) => {
-        const cachedMethod = this.methodCache.get(className)?.get(methodName);
+      get: (_target: ClassTypeProxy<T>, p: string | symbol, _receiver: any) => {
+        const methodName = p.toString();
+        const cachedMethod = this.methodCache.get(className)?.get(p.toString());
         if (cachedMethod) {
           return cachedMethod;
         }

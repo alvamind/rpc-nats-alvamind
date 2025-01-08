@@ -37,7 +37,7 @@
   "author": "alvamind",
   "license": "MIT",
   "dependencies": {
-    "@typescript-eslint/parser": "^8.19.1",
+    "@types/lodash": "^4.17.14",
     "alvamind-tools": "^1.0.20",
     "chalk": "^5.3.0",
     "chokidar": "^4.0.3",
@@ -47,20 +47,20 @@
     "nats": "^2.28.2",
     "retry-util-alvamind": "^1.0.1",
     "ts-morph": "^25.0.0",
+    "typescript": "^5.7.2",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
     "@types/bun": "^1.1.15",
-    "@types/lodash": "^4.17.14",
-    "@types/node": "^22.10.5",
     "@types/yargs": "^17.0.33",
     "bun-types": "^1.1.42",
-    "rimraf": "^6.0.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "rimraf": "^6.0.1"
   },
   "files": [
     "dist/**/*",
     "welcome.js"
-  ]
+  ],
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
 }

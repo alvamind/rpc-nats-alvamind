@@ -7,8 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
-import { Stats } from 'fs';
-import { Project, Node, SourceFile, ClassDeclaration } from 'ts-morph';
+import { Project, Node, SourceFile } from 'ts-morph';
 
 // --- Interfaces ---
 interface ClassInfo {
@@ -49,7 +48,6 @@ class Logger {
     console.error(...args);
   }
 }
-
 
 // --- Argument Parsing ---
 const parseArgs = (): Config => {
@@ -96,7 +94,6 @@ const parseArgs = (): Config => {
   return argv as unknown as Config;
 };
 
-
 // --- File System Operations ---
 class FileSystem {
   async ensureDir(dirPath: string): Promise<void> {
@@ -108,14 +105,13 @@ class FileSystem {
   }
 
   async findFiles(includes: string[], excludes: string[]): Promise<string[]> {
-    return includes.reduce < Promise < string[] >> (async (acc, include) => {
+    return includes.reduce<Promise<string[]>>(async (acc, include) => {
       const accumulated = await acc;
       const matchedFiles = await glob(include, { ignore: excludes });
       return [...accumulated, ...matchedFiles];
     }, Promise.resolve([]));
   }
 }
-
 
 // --- Code Analysis ---
 class CodeAnalyzer {
@@ -131,22 +127,20 @@ class CodeAnalyzer {
 
   async analyzeClasses(files: string[], includes: string[]): Promise<ClassInfo[]> {
     this.project.addSourceFilesAtPaths(files);
-    return this.project
-      .getSourceFiles()
-      .reduce < ClassInfo[] > ((acc, sourceFile) => {
-        const filePath = sourceFile.getFilePath();
-        const isIncluded = includes.some((pattern) => glob.sync(pattern).includes(filePath));
+    return this.project.getSourceFiles().reduce<ClassInfo[]>((acc, sourceFile) => {
+      const filePath = sourceFile.getFilePath();
+      const isIncluded = includes.some((pattern) => glob.sync(pattern).includes(filePath));
 
-        if (!isIncluded) {
-          return acc;
-        }
-        this.logger.debug('Processing source file:', filePath);
-        const exportedClasses = this.extractExportedClasses(sourceFile, includes);
-        return [...acc, ...exportedClasses];
-      }, []);
+      if (!isIncluded) {
+        return acc;
+      }
+      this.logger.debug('Processing source file:', filePath);
+      const exportedClasses = this.extractExportedClasses(sourceFile, includes);
+      return [...acc, ...exportedClasses];
+    }, []);
   }
 
-  private extractExportedClasses(sourceFile: SourceFile, includes: string[]): ClassInfo[] {
+  private extractExportedClasses(sourceFile: SourceFile, _includes: string[]): ClassInfo[] {
     const exportedDeclarations = sourceFile.getExportedDeclarations();
     this.logger.debug('Exported declarations:', exportedDeclarations.keys());
 
@@ -185,15 +179,14 @@ class CodeAnalyzer {
   }
 }
 
-
 // --- Code Generator ---
 class CodeGenerator {
   private fileSystem: FileSystem;
   private logger: Logger;
 
   constructor(fileSystem: FileSystem, logger: Logger) {
-    this.fileSystem = fileSystem
-    this.logger = logger
+    this.fileSystem = fileSystem;
+    this.logger = logger;
   }
 
   async generateCode(classes: ClassInfo[], outputFile: string): Promise<void> {
@@ -216,13 +209,13 @@ ${classImports}
 /**
  * RPC Services
  * ${classes
-        .map(
-          (c) => `
+   .map(
+     (c) => `
  * @property ${c.name}
  * Available Methods: ${c.methods.join(', ')}
  *`,
-        )
-        .join('\n')}
+   )
+   .join('\n')}
  */
 export class RPCServices {
 ${classProperties}
@@ -264,7 +257,6 @@ export class RPCServices {
   }
 }
 
-
 // --- Main ---
 async function main() {
   const config = parseArgs();
@@ -297,7 +289,6 @@ async function main() {
 
       await codeGenerator.generateCode(classes, config.output);
       logger.info(`Generated ${config.output} with ${classes.length} services.`);
-
     } catch (error) {
       logger.error('Error during generation:', error);
     } finally {
@@ -325,6 +316,5 @@ async function main() {
     logger.info('Watching for changes...');
   }
 }
-
 
 main().catch(console.error);

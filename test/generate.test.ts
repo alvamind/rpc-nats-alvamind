@@ -1,5 +1,5 @@
 // rpc-nats-alvamind/test/generate.test.ts
-import { describe, test, beforeAll, afterAll, expect, beforeEach, afterEach, it } from 'bun:test';
+import { describe, expect, beforeEach, afterEach, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from 'node:child_process';

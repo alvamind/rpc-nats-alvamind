@@ -132,7 +132,7 @@ export class RPCServer implements IRPCServer {
     className: string,
     methodName: string,
     data: any,
-    reply: string,
+    _reply: string,
     instance: any
   ): Promise<any> {
     const method = instance[methodName];
