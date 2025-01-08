@@ -9,9 +9,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
-import { Project, Node, SourceFile } from 'ts-morph';
+import { Project, SourceFile } from 'ts-morph';
 import { minimatch } from 'minimatch';
-import { Config } from './types'; // Import Config interface
+import { Config } from './types';
+import { ModuleKind, ModuleResolutionKind, ScriptTarget } from 'typescript';
 
 // --- Interfaces ---
 interface ClassInfo {
@@ -103,15 +104,18 @@ class FileSystem {
   }
 
   public async findFiles(includes: string[] | undefined, excludes: string[]): Promise<string[]> {
-    const defaultIncludes = ['**/*']; // all files recursive
+    const defaultIncludes = ['**/*'];
     const effectiveIncludes = includes && includes.length > 0 ? includes : defaultIncludes;
     const defaultExcludes = ['**/node_modules/**', '**/dist/**', '**/build/**'];
 
     const allFiles = await effectiveIncludes.reduce<Promise<string[]>>(async (acc, include) => {
       const accumulated = await acc;
-      const matchedFiles = await glob(include, {
+      // Handle both absolute and relative paths
+      const pattern = path.isAbsolute(include) ? include : path.join(process.cwd(), include);
+      const matchedFiles = await glob(pattern, {
         ignore: [...defaultExcludes, ...excludes],
         nodir: true,
+        absolute: true,
       });
       return [...accumulated, ...matchedFiles];
     }, Promise.resolve([]));
@@ -131,68 +135,141 @@ class CodeAnalyzer {
     this.logger = logger;
     this.project = new Project({
       tsConfigFilePath: path.join(process.cwd(), 'tsconfig.json'),
+      compilerOptions: {
+        experimentalDecorators: true,
+        emitDecoratorMetadata: true,
+        declaration: true,
+        moduleResolution: ModuleResolutionKind.Node16,
+        target: ScriptTarget.ES2015,
+        module: ModuleKind.CommonJS,
+      },
+      skipAddingFilesFromTsConfig: true,
+      skipFileDependencyResolution: true,
     });
   }
 
   async analyzeClasses(files: string[], includes: string[] | undefined, excludes: string[]): Promise<ClassInfo[]> {
-    this.project.addSourceFilesAtPaths(files);
+    this.logger.debug('Analyzing files:', files);
 
-    return this.project.getSourceFiles().reduce<ClassInfo[]>((acc, sourceFile) => {
-      const filePath = sourceFile.getFilePath();
-      const isExcluded = excludes.some((pattern) => glob.sync(pattern).includes(filePath));
-      const effectiveIncludes = includes || [];
-      const isIncluded =
-        effectiveIncludes.length === 0
-          ? true
-          : effectiveIncludes.some((pattern) => glob.sync(pattern).includes(filePath));
+    // Clear existing source files
+    this.project.getSourceFiles().forEach((file) => {
+      this.project.removeSourceFile(file);
+    });
 
-      if (!isIncluded || isExcluded) {
-        this.logger.debug('Skipping source file due to include/exclude:', filePath);
-        return acc;
-      }
+    try {
+      // Add new source files
+      const sourceFiles = this.project.addSourceFilesAtPaths(files);
+      this.logger.debug(`Added ${sourceFiles.length} source files to the project`);
 
-      this.logger.debug('Processing source file:', filePath);
-      const exportedClasses = this.extractExportedClasses(sourceFile);
-      return [...acc, ...exportedClasses];
-    }, []);
+      const results = await Promise.all(
+        this.project.getSourceFiles().map(async (sourceFile) => {
+          const filePath = sourceFile.getFilePath();
+          this.logger.debug(`Processing file: ${filePath}`);
+
+          const isExcluded = excludes.some((pattern) => minimatch(filePath, pattern));
+          const effectiveIncludes = includes || [];
+          const isIncluded =
+            effectiveIncludes.length === 0 ? true : effectiveIncludes.some((pattern) => minimatch(filePath, pattern));
+
+          if (!isIncluded || isExcluded) {
+            this.logger.debug(`Skipping ${filePath} (included: ${isIncluded}, excluded: ${isExcluded})`);
+            return [];
+          }
+
+          const exportedClasses = this.extractExportedClasses(sourceFile);
+          this.logger.debug(`Found ${exportedClasses.length} classes in ${filePath}`);
+          return exportedClasses;
+        }),
+      );
+
+      return results.flat();
+    } catch (error) {
+      this.logger.error('Error analyzing classes:', error);
+      throw error;
+    }
   }
 
   private extractExportedClasses(sourceFile: SourceFile): ClassInfo[] {
-    const exportedDeclarations = sourceFile.getExportedDeclarations();
-    this.logger.debug('Exported declarations:', exportedDeclarations.keys());
+    const classes: ClassInfo[] = [];
 
-    const exportedClasses: ClassInfo[] = [];
+    sourceFile.getClasses().forEach((classDecl) => {
+      try {
+        this.logger.debug(`Analyzing class: ${classDecl.getName()}`);
 
-    exportedDeclarations.forEach((declarations, exportName) => {
-      declarations.forEach((declaration) => {
-        let classDecl: Node | undefined = declaration;
-        let isDefaultExport = false;
+        // Check if class has decorators
+        const hasDecorators = classDecl.getDecorators().length > 0;
 
-        if (Node.isExportAssignment(declaration)) {
-          isDefaultExport = true;
-          const expression = declaration.getExpression();
-          if (Node.isClassExpression(expression) || Node.isIdentifier(expression)) {
-            classDecl = Node.isIdentifier(expression) ? sourceFile.getClass(expression.getText()) : expression;
-          }
+        // Skip abstract classes
+        if (classDecl.isAbstract()) {
+          this.logger.debug(`Skipping abstract class: ${classDecl.getName()}`);
+          return;
         }
 
-        if (Node.isClassDeclaration(classDecl) && !classDecl.isAbstract()) {
-          if (classDecl.isExported() || isDefaultExport) {
-            if (classDecl.getSourceFile() === sourceFile) {
-              const methods = classDecl.getMethods().map((m) => m.getName());
-              const className = classDecl.getName() || (exportName === 'default' ? 'DefaultExport' : exportName);
+        // Check export status
+        let isExported = classDecl.isExported();
 
-              exportedClasses.push({
+        // Handle renamed exports
+        const exportDeclarations = sourceFile.getExportDeclarations();
+        const exportedSymbols = exportDeclarations.flatMap((exp) =>
+          exp.getNamedExports().map((named) => ({
+            name: named.getName(),
+            alias: named.getAliasNode()?.getText(),
+          })),
+        );
+
+        if (exportedSymbols.some((exp) => exp.name === classDecl.getName() || exp.alias === classDecl.getName())) {
+          isExported = true;
+        }
+
+        if (isExported || hasDecorators) {
+          const methods = classDecl
+            .getMethods()
+            .filter((method) => !method.getModifiers().some((mod) => mod.getText() === 'private'))
+            .map((method) => method.getName());
+
+          const className = classDecl.getName();
+          if (className) {
+            // Get the actual exported name if it's renamed
+            const exportedName =
+              exportedSymbols.find((exp) => exp.name === className || exp.alias === className)?.alias || className;
+            classes.push({
+              name: exportedName,
+              path: sourceFile.getFilePath(),
+              methods,
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.debug(`Error processing class ${classDecl.getName()}: ${error}`);
+      }
+    });
+
+    // Handle namespace exports
+    sourceFile.getModules().forEach((namespace) => {
+      try {
+        namespace.getClasses().forEach((classDecl) => {
+          if (classDecl.isExported() && !classDecl.isAbstract()) {
+            const methods = classDecl
+              .getMethods()
+              .filter((method) => !method.getModifiers().some((mod) => mod.getText() === 'private'))
+              .map((method) => method.getName());
+
+            const className = classDecl.getName();
+            if (className) {
+              classes.push({
                 name: className,
                 path: sourceFile.getFilePath(),
                 methods,
               });
             }
           }
-        }
-      });
+        });
+      } catch (error) {
+        this.logger.debug(`Error processing namespace: ${error}`);
+      }
     });
-    return exportedClasses;
+
+    return classes;
   }
 }
 
