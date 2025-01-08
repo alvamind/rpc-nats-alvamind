@@ -21,13 +21,14 @@ type RunMode = 'cli' | 'direct';
 
 const runConfig: { runMode: RunMode } = {
   // runMode: 'cli', // Default to CLI mode
-  runMode: 'cli', //Default to Direct mode
+  runMode: 'direct', //Default to Direct mode
 };
 
 
 const createTestFiles = async () => {
   await fs.mkdir(sourceDir, { recursive: true });
   await fs.mkdir(modelsDir, { recursive: true });
+
   // Controller 1 with complex imports
   await fs.writeFile(path.join(sourceDir, 'user.controller.ts'), `
     import { User } from '../../models/user.model';
@@ -47,6 +48,7 @@ const createTestFiles = async () => {
         }
     }
     `);
+
   // Controller 2 with different structure
   await fs.writeFile(path.join(sourceDir, 'auth.controller.ts'), `
     export class AuthController {
@@ -54,12 +56,21 @@ const createTestFiles = async () => {
             if (credentials.user === 'test' && credentials.pass === 'test') return 'token';
             return 'invalid credentials';
         }
-
         async logout(): Promise<void> {
           return;
         }
     }
     `);
+
+  // Add the worker file here
+  await fs.writeFile(path.join(sourceDir, 'user.worker.ts'), `
+    export class UserWorker {
+        async processUser(id: number): Promise<void> {
+            console.log('Processing user:', id);
+        }
+    }
+  `);
+
   await fs.writeFile(path.join(modelsDir, 'user.model.ts'), `
     export interface User {
         id: number;
@@ -76,7 +87,6 @@ const createTestFiles = async () => {
         }
     }
     `);
-
 };
 
 const deleteTestFiles = async () => {
@@ -117,7 +127,7 @@ const runDirect = async (options: { includes?: string[], excludes?: string[], ou
     excludes,
     output,
     watch: false,
-    logLevel: 'info',
+    logLevel: 'debug',
   };
   try {
     await main(config)
@@ -171,6 +181,29 @@ describe('generateRpcServices - Real Scenarios', () => {
     const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
     expect(outputFileContent).toContain('UserController');
     expect(outputFileContent).not.toContain('AuthController');
+  });
+
+  it('should handle direct file naming pattern includes correctly', async () => {
+    await runGenerator({
+      includes: ['user.controller.ts'],
+    });
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).not.toContain('AuthController');
+    expect(outputFileContent).not.toContain('UserWorker');
+  });
+
+  it('should handle a mix of path and file name pattern includes', async () => {
+    await runGenerator({
+      includes: [
+        path.join(sourceDir, '**/*.worker.ts'),  // Path-like pattern
+        '**/*.controller.ts'                      // Filename pattern
+      ],
+    });
+    const outputFileContent = await fs.readFile(outputFilePath, 'utf-8');
+    expect(outputFileContent).toContain('UserController');
+    expect(outputFileContent).toContain('AuthController');
+    expect(outputFileContent).toContain('UserWorker');
   });
 
   it('should generate rpc-services.ts correctly with multiple controllers and complex paths', async () => {
