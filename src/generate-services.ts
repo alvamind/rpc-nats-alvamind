@@ -10,7 +10,7 @@ import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
 import { Project, SourceFile } from 'ts-morph';
-import { minimatch } from 'minimatch';
+import picomatch from 'picomatch';
 import { Config } from './types';
 import { ModuleKind, ModuleResolutionKind, ScriptTarget } from 'typescript';
 
@@ -109,8 +109,6 @@ class FileSystem {
     await fs.writeFile(filePath, content, 'utf-8');
   }
 
-  // In FileSystem class in generate-services.ts
-
   public async findFiles(includes: string[] | undefined, excludes: string[]): Promise<string[]> {
     const defaultIncludes = ['**/*'];
     const effectiveIncludes = includes && includes.length > 0 ? includes : defaultIncludes;
@@ -129,19 +127,14 @@ class FileSystem {
 
       this.logger.debug(`Processing include pattern: ${include}`);
 
-      // Handle absolute paths
       if (path.isAbsolute(include)) {
         patterns = [include];
       } else if (include.includes('/') || include.includes('\\')) {
-        // Handle path-like patterns (contains slashes)
         patterns = [path.join(process.cwd(), include)];
       } else {
-        // Handle filename patterns (e.g., *.controller.ts)
-        // Search both in current directory and recursively
         patterns = [path.join(process.cwd(), '**', include), path.join(process.cwd(), include)];
       }
 
-      // Convert Windows paths to POSIX style for glob
       patterns = patterns.map((p) => p.replace(/\\/g, '/'));
       this.logger.debug('Normalized patterns:', patterns);
 
@@ -166,14 +159,11 @@ class FileSystem {
       return [...accumulated, ...files];
     }, Promise.resolve([]));
 
-    // Remove duplicates
     const uniqueFiles = [...new Set(allFiles)];
     this.logger.debug('Unique files before exclusion:', uniqueFiles);
 
-    // Apply exclusions with matchBase option
-    const finalFiles = uniqueFiles.filter(
-      (file) => !allExcludes.some((exclude) => minimatch(file, exclude, { matchBase: true })),
-    );
+    const isExcluded = picomatch(allExcludes, { matchBase: true });
+    const finalFiles = uniqueFiles.filter((file) => !isExcluded(file));
 
     this.logger.debug('Final files after exclusion:', finalFiles);
     this.logger.debug('Total files found:', finalFiles.length);
@@ -206,24 +196,22 @@ class CodeAnalyzer {
   async analyzeClasses(files: string[], _includes: string[] | undefined, excludes: string[]): Promise<ClassInfo[]> {
     this.logger.debug('Analyzing files:', files);
 
-    // Clear existing source files
     this.project.getSourceFiles().forEach((file) => {
       this.project.removeSourceFile(file);
     });
 
     try {
-      // Add new source files
       const sourceFiles = this.project.addSourceFilesAtPaths(files);
       this.logger.debug(`Added ${sourceFiles.length} source files to the project`);
+
+      const isExcluded = picomatch(excludes, { matchBase: true });
 
       const results = await Promise.all(
         sourceFiles.map(async (sourceFile) => {
           const filePath = sourceFile.getFilePath();
           this.logger.debug(`Processing file: ${filePath}`);
 
-          const isExcluded = excludes.some((pattern) => minimatch(filePath, pattern, { matchBase: true }));
-
-          if (isExcluded) {
+          if (isExcluded(filePath)) {
             this.logger.debug(`Skipping excluded file: ${filePath}`);
             return [];
           }
@@ -264,65 +252,6 @@ class CodeAnalyzer {
 
     return classes;
   }
-
-  // private extractExportedClasses(sourceFile: SourceFile): ClassInfo[] {
-  //   const classes: ClassInfo[] = [];
-
-  //   sourceFile.getClasses().forEach((classDecl) => {
-  //     try {
-  //       const className = classDecl.getName();
-  //       this.logger.debug(`Analyzing class: ${className}`);
-
-  //       // Skip abstract classes
-  //       if (classDecl.isAbstract()) {
-  //         this.logger.debug(`Skipping abstract class: ${className}`);
-  //         return;
-  //       }
-
-  //       // Check if class is exported
-  //       const isExported = classDecl.isExported();
-  //       this.logger.debug(`Class ${className} export status: ${isExported}`);
-
-  //       // Handle renamed exports
-  //       const exportDeclarations = sourceFile.getExportDeclarations();
-  //       const exportedSymbols = exportDeclarations.flatMap((exp) =>
-  //         exp.getNamedExports().map((named) => ({
-  //           name: named.getName(),
-  //           alias: named.getAliasNode()?.getText(),
-  //         })),
-  //       );
-
-  //       this.logger.debug(`Exported symbols for ${className}:`, exportedSymbols);
-
-  //       const hasDecorators = classDecl.getDecorators().length > 0;
-  //       this.logger.debug(`Class ${className} has decorators: ${hasDecorators}`);
-
-  //       if (isExported || hasDecorators) {
-  //         const methods = classDecl
-  //           .getMethods()
-  //           .filter((method) => !method.getModifiers().some((mod) => mod.getText() === 'private'))
-  //           .map((method) => method.getName());
-
-  //         if (className) {
-  //           const exportedName =
-  //             exportedSymbols.find((exp) => exp.name === className || exp.alias === className)?.alias || className;
-
-  //           this.logger.debug(`Adding class ${exportedName} with methods:`, methods);
-
-  //           classes.push({
-  //             name: exportedName,
-  //             path: sourceFile.getFilePath(),
-  //             methods,
-  //           });
-  //         }
-  //       }
-  //     } catch (error) {
-  //       this.logger.debug(`Error processing class ${classDecl.getName()}: ${error}`);
-  //     }
-  //   });
-
-  //   return classes;
-  // }
 }
 
 // --- Code Generator ---
