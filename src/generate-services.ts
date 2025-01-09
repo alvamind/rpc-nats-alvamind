@@ -10,7 +10,7 @@ import path from 'node:path';
 import chokidar from 'chokidar';
 import { debounce } from 'lodash';
 import { Project, SourceFile } from 'ts-morph';
-import { minimatch } from 'minimatch';
+import minimatch from 'minimatch';
 import { Config } from './types';
 import { ModuleKind, ModuleResolutionKind, ScriptTarget } from 'typescript';
 

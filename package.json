@@ -1,6 +1,6 @@
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "A flexible RPC library using NATS",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
