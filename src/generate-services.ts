@@ -203,7 +203,7 @@ class CodeAnalyzer {
     });
   }
 
-  async analyzeClasses(files: string[], includes: string[] | undefined, excludes: string[]): Promise<ClassInfo[]> {
+  async analyzeClasses(files: string[], _includes: string[] | undefined, excludes: string[]): Promise<ClassInfo[]> {
     this.logger.debug('Analyzing files:', files);
 
     // Clear existing source files
