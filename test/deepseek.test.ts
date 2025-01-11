@@ -194,8 +194,7 @@ describe('RPC System', () => {
     await rpcServer.handleRequest(service);
     const proxy = rpcClient.createProxy(DLQService);
     await expect(proxy.dlqMethod()).rejects.toThrow('Permanent Failure');
-    // Verify DLQ message
-    await dlqServer.close();
+    await dlqServer.close()
   });
 
   it('should handle null responses correctly', async () => {
@@ -262,7 +261,6 @@ describe('RPC System', () => {
     }
     expect(errorResult.status).toBe('rejected');
   });
-
   it('should distinguish between timeouts and null responses', async () => {
     class TimeoutNullService {
       async timeoutMethod() {
@@ -285,5 +283,5 @@ describe('RPC System', () => {
     if (nullResult.status === 'fulfilled') {
       expect(nullResult.value).toBeNull();
     }
-  });;
+  });
 });

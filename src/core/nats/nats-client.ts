@@ -81,6 +81,7 @@ export class NatsClient implements INatsClient {
       });
     }
   }
+
   async publish<T = unknown>(subject: string, data: T, reply?: string): Promise<void> {
     if (!this.nc) {
       throw new Error("Nats client not initialized yet");
@@ -108,9 +109,13 @@ export class NatsClient implements INatsClient {
       return decoded;
     } catch (error) {
       Logger.error(`Request failed for ${subject}:`, error);
+      if ((error as Error).message === 'TIMEOUT') {
+        throw new Error('TimeoutError')
+      }
       throw error;
     }
   }
+
   async unsubscribe(subject: string): Promise<void> {
     const subscription = this.subscriptions.get(subject);
     if (subscription) {

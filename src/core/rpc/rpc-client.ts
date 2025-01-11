@@ -57,9 +57,9 @@ export class RPCClient implements IRPCClient {
     const handler: ProxyHandler<ClassTypeProxy<T>> = {
       get: (_target: ClassTypeProxy<T>, p: string | symbol, _receiver: any) => {
         const methodName = p.toString();
-        const cachedMethod = this.methodCache.get(className)?.get(p.toString());
-        if (cachedMethod) {
-          return cachedMethod;
+
+        if (this.methodCache.get(className)?.has(methodName)) {
+          return this.methodCache.get(className)?.get(methodName);
         }
 
         const methodProxy = async (...args: any[]): Promise<any> => {
@@ -73,7 +73,6 @@ export class RPCClient implements IRPCClient {
               input !== undefined ? input : null, // Send null if input is undefined
               this.timeout
             );
-
             Logger.debug(`Received response from ${subject}:`, response);
 
             if (response && typeof response === 'object' && 'error' in response) {
@@ -93,9 +92,45 @@ export class RPCClient implements IRPCClient {
         this.methodCache.get(className)?.set(methodName, methodProxy);
         return methodProxy;
       }
-    };
+    }
 
-    return new Proxy({} as ClassTypeProxy<T>, handler);
+
+    const proxy = new Proxy({} as ClassTypeProxy<T>, handler);
+
+    const methods = Object.getOwnPropertyNames(classConstructor.prototype).filter(method => method !== "constructor")
+    methods.forEach(methodName => {
+      if (!this.methodCache.get(className)?.has(methodName)) {
+        const subject = `${className}.${methodName}`;
+        const methodProxy = async (...args: any[]): Promise<any> => {
+          const input = args[0];
+          Logger.debug(`Client requesting to subject: ${subject}`, input);
+
+          try {
+            const response = await this.natsClient.request(
+              subject,
+              input !== undefined ? input : null,
+              this.timeout
+            );
+            Logger.debug(`Received response from ${subject}:`, response);
+
+            if (response && typeof response === 'object' && 'error' in response) {
+              throw new Error(response.error as string);
+            }
+
+            return response;
+          } catch (error) {
+            Logger.error(
+              `Error calling method "${methodName}" on class "${className}":`,
+              error
+            );
+            throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
+          }
+        };
+
+        this.methodCache.get(className)?.set(methodName, methodProxy)
+      }
+    })
+    return proxy;
   }
 
   getAvailableMethods(className: string): string[] {
