@@ -1,3 +1,4 @@
+// rpc-nats-alvamind/src/core/rpc/rpc-server.ts
 import { NatsClient } from '../nats/nats-client';
 import { Logger } from '../utils/logger';
 import { defaultNatsOptions, ClassType } from '../../types';
@@ -10,6 +11,7 @@ export class RPCServer implements IRPCServer {
   private retryConfig: RetryConfigInterface;
   private dlqSubject?: string;
   private isStarted: boolean = false;
+
   constructor(options: RPCServerOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
     this.methodMapping = new Map();
@@ -77,7 +79,6 @@ export class RPCServer implements IRPCServer {
       Logger.info(`Registered ${methods.size} methods for ${className}`);
     }
   }
-
   private async processRequestWithRetry(
     className: string,
     methodName: string,
@@ -96,16 +97,14 @@ export class RPCServer implements IRPCServer {
       const result = await RetryUtil.withRetry(
         async () => {
           const response = await this.processRequest(className, methodName, data, reply, instance);
-          // If processRequest throws, retry will happen
           return response;
         },
         this.retryConfig,
         onRetry
       );
 
-      if (result) {
-        await this.natsClient.publish(reply, result);
-      }
+      // Always publish response, even if null
+      await this.natsClient.publish(reply, result);
     } catch (error) {
       Logger.error(`Request to ${className}.${methodName} failed after all retries:`, error);
 
@@ -120,10 +119,10 @@ export class RPCServer implements IRPCServer {
         await this.natsClient.publish(this.dlqSubject, dlqMessage);
         Logger.info(`Message sent to DLQ ${this.dlqSubject}`);
       }
-
-      // Always send error response back to client
+      //  Error response must be an object
       await this.natsClient.publish(reply, {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : "Error"
       });
     }
   }
@@ -142,16 +141,21 @@ export class RPCServer implements IRPCServer {
 
     try {
       const result = await method.call(instance, data);
-      Logger.debug(`Successfully processed ${className}.${methodName}`, {
-        input: data,
-        output: result
-      });
+      // Explicitly handle null responses
+      if (result === null) {
+        return { __null: true };
+      }
       return result;
     } catch (error) {
       Logger.error(`Error executing "${methodName}" in class "${className}":`, error);
-      throw error;
+      // Error response must be an object
+      throw {
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : "Error"
+      };
     }
   }
+
 
   public getRegisteredMethods(): Map<string, Set<string>> {
     const result = new Map<string, Set<string>>();

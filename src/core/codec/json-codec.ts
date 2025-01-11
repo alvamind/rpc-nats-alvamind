@@ -1,7 +1,11 @@
+// rpc-nats-alvamind/src/core/codec/json-codec.ts
 import { NatsCodec } from './codec.interface';
 
 export class JsonCodec<T> implements NatsCodec<T> {
   encode(data: T): Uint8Array {
+    if (data === null || data === undefined) {
+      return new Uint8Array(0); // Return empty array for null/undefined
+    }
     const serialized = JSON.stringify(data, (_, value) => {
       if (value instanceof Date) {
         return { __type: 'Date', value: value.toISOString() };
@@ -21,6 +25,9 @@ export class JsonCodec<T> implements NatsCodec<T> {
   }
 
   decode(data: Uint8Array): T {
+    if (data.length === 0) {
+      return null as T; // Return null for empty array
+    }
     return JSON.parse(new TextDecoder().decode(data), (_, value) => {
       if (value && typeof value === 'object') {
         switch (value.__type) {

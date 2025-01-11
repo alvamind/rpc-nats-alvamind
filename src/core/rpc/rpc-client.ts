@@ -1,3 +1,4 @@
+// rpc-nats-alvamind/src/core/rpc/rpc-client.ts
 import { NatsClient } from '../nats/nats-client';
 import { defaultNatsOptions, ClassType, ClassTypeProxy } from '../../types';
 import { Logger } from '../utils/logger';
@@ -11,7 +12,7 @@ export class RPCClient implements IRPCClient {
 
   constructor(options: RPCClientOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
-    this.timeout = options.timeout || 10000; // Default 10 second timeout
+    this.timeout = options.timeout || 30000; // Default 30 second timeout
     Logger.setLogLevel(options?.logLevel ?? defaultNatsOptions.logLevel);
   }
 
@@ -68,23 +69,29 @@ export class RPCClient implements IRPCClient {
           Logger.debug(`Client requesting to subject: ${subject}`, input);
 
           try {
-            const response = await this.natsClient.request(
-              subject,
-              input !== undefined ? input : null, // Send null if input is undefined
-              this.timeout
-            );
+            const response = await this.natsClient.request(subject, input !== undefined ? input : null, this.timeout) as Record<string, any> | null;
             Logger.debug(`Received response from ${subject}:`, response);
 
-            if (response && typeof response === 'object' && 'error' in response) {
-              throw new Error(response.error as string);
+            // Handle null responses
+            if (response && typeof response === 'object' && response['__null'] === true) {
+              return null;
             }
-
+            if (response && typeof response === 'object' && 'error' in response) {
+              const errorResponse = response as { error: string, errorType?: string }
+              // Reconstruct original error type if possible
+              if (errorResponse.errorType) {
+                const ErrorConstructor = globalThis[errorResponse.errorType as keyof typeof globalThis] as typeof Error
+                if (ErrorConstructor) {
+                  throw new ErrorConstructor(errorResponse.error);
+                }
+              }
+              throw new Error(errorResponse.error);
+            }
             return response;
-          } catch (error) {
-            Logger.error(
-              `Error calling method "${methodName}" on class "${className}":`,
-              error
-            );
+
+          }
+          catch (error) {
+            Logger.error(`Error calling method "${methodName}" on class "${className}":`, error);
             throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
           }
         };
@@ -106,23 +113,31 @@ export class RPCClient implements IRPCClient {
           Logger.debug(`Client requesting to subject: ${subject}`, input);
 
           try {
-            const response = await this.natsClient.request(
-              subject,
-              input !== undefined ? input : null,
-              this.timeout
-            );
+            const response = await this.natsClient.request(subject, input !== undefined ? input : null, this.timeout) as Record<string, any> | null;
             Logger.debug(`Received response from ${subject}:`, response);
 
-            if (response && typeof response === 'object' && 'error' in response) {
-              throw new Error(response.error as string);
+            // Handle null responses
+            if (response && typeof response === 'object' && response['__null'] === true) {
+              return null;
             }
 
+            if (response && typeof response === 'object' && 'error' in response) {
+              const errorResponse = response as { error: string, errorType?: string }
+              // Reconstruct original error type if possible
+              if (errorResponse.errorType) {
+                const ErrorConstructor = globalThis[errorResponse.errorType as keyof typeof globalThis] as typeof Error
+                if (ErrorConstructor) {
+                  throw new ErrorConstructor(errorResponse.error);
+                }
+              }
+              throw new Error(errorResponse.error);
+            }
+
+
             return response;
-          } catch (error) {
-            Logger.error(
-              `Error calling method "${methodName}" on class "${className}":`,
-              error
-            );
+          }
+          catch (error) {
+            Logger.error(`Error calling method "${methodName}" on class "${className}":`, error);
             throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
           }
         };

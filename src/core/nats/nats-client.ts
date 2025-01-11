@@ -1,21 +1,25 @@
+// rpc-nats-alvamind/src/core/nats/nats-client.ts
 import {
   connect,
   NatsConnection,
   SubscriptionOptions,
   JetStreamClient,
-  Subscription
+  Subscription,
+  Msg
 } from "nats";
 import { getCodec } from "../codec/codec";
 import { INatsClient } from "./nats-client.interface";
 import { defaultNatsOptions, NatsOptions } from "../../types";
 import { Logger } from "../utils/logger";
 import { NatsCodec } from "../codec/codec.interface";
+
 export class NatsClient implements INatsClient {
   private nc: NatsConnection | null = null;
   private jsm: JetStreamClient | null = null;
   private codec: NatsCodec<any>;
   private options: NatsOptions;
   private subscriptions: Map<string, Subscription> = new Map();
+
   constructor(options: NatsOptions) {
     this.options = options;
     this.codec = getCodec(options?.codec);
@@ -24,6 +28,7 @@ export class NatsClient implements INatsClient {
       Logger.setLogLevel("debug");
     }
   }
+
   async connect(): Promise<void> {
     try {
       this.nc = await connect({
@@ -36,6 +41,7 @@ export class NatsClient implements INatsClient {
       throw new Error("Failed to connect to NATS");
     }
   }
+
   async close(): Promise<void> {
     for (const subscription of this.subscriptions.values()) {
       subscription.unsubscribe();
@@ -46,15 +52,19 @@ export class NatsClient implements INatsClient {
       Logger.info("NATS connection closed");
     }
   }
+
   getJetstreamClient(): JetStreamClient | null {
     return this.jsm;
   }
+
   getNatsConnection(): NatsConnection | null {
     return this.nc;
   }
+
   getCodec<T = any>(): NatsCodec<T> {
     return this.codec;
   }
+
   async subscribe<T = unknown>(
     subject: string,
     cb: (data: T, reply: string) => void | Promise<void>,
@@ -93,28 +103,32 @@ export class NatsClient implements INatsClient {
 
   async request<TRequest = unknown, TResponse = unknown>(
     subject: string,
-    data: TRequest | null, // Accept null explicitly
-    timeout = 5000
+    data: TRequest | null,
+    timeout = 30000
   ): Promise<TResponse> {
     if (!this.nc) {
       throw new Error("Nats client not initialized yet");
     }
 
+    const encoded = data !== null ? this.codec.encode(data) : undefined;
     try {
       Logger.debug(`Sending request to ${subject}:`, data);
-      const encoded = data !== null ? this.codec.encode(data) : undefined;
-      const response = await this.nc.request(subject, encoded, { timeout });
-      const decoded = this.codec.decode(response.data) as TResponse;
+
+      const response = await this.nc!.request(subject, encoded, { timeout }) as Msg;
+
+      const decoded = response.data?.length ? this.codec.decode(response.data) as TResponse : null as TResponse;
       Logger.debug(`Received response from ${subject}:`, decoded);
       return decoded;
     } catch (error) {
       Logger.error(`Request failed for ${subject}:`, error);
       if ((error as Error).message === 'TIMEOUT') {
-        throw new Error('TimeoutError')
+        throw new Error('TimeoutError');
+      } else {
+        throw error;
       }
-      throw error;
     }
   }
+
 
   async unsubscribe(subject: string): Promise<void> {
     const subscription = this.subscriptions.get(subject);
@@ -124,21 +138,26 @@ export class NatsClient implements INatsClient {
       Logger.debug(`Unsubscribed from ${subject}`);
     }
   }
+
   async drain(): Promise<void> {
     if (this.nc) {
       await this.nc.drain();
       Logger.info("NATS connection drained");
     }
   }
+
   isConnected(): boolean {
     return this.nc !== null && !this.nc.isClosed();
   }
+
   getServerInfo(): string | undefined {
     return this.nc?.getServer();
   }
+
   getSubscriptionCount(): number {
     return this.subscriptions.size;
   }
+
   getActiveSubjects(): string[] {
     return Array.from(this.subscriptions.keys());
   }
