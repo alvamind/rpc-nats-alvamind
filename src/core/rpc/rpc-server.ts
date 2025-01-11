@@ -113,7 +113,8 @@ export class RPCServer implements IRPCServer {
           className,
           methodName,
           data,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.constructor.name : "Error"
         };
 
         await this.natsClient.publish(this.dlqSubject, dlqMessage);
