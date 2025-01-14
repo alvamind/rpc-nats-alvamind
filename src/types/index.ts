@@ -34,12 +34,4 @@ export type TransformToPromise<T extends ClassType> = {
   : T[K];
 };
 
-
-export type ClassTypeProxy<T extends ClassType> = {
-  [K in keyof T]:
-  T[K] extends (...args: infer Args) => Promise<infer R>
-  ? (...args: Args) => Promise<R>
-  : T[K] extends (...args: infer Args) => infer R
-  ? (...args: Args) => Promise<R>
-  : T[K]
-};
+export type ClassTypeProxy<T extends ClassType> = TransformToPromise<T>;

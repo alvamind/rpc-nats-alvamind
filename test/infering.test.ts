@@ -1,108 +1,153 @@
-import { ClassTypeProxy, RPCClient, RPCServer } from "../src";
+// import { RPCClient, ClassTypeProxy, RPCServer, TransformToPromise } from '../index';
+// import { $Enums } from '@prisma/client';
 
 
-// Example similar to prisma response.
-type PrismaResponse = {
-  interactions: {
-    type: "a" | "b";
-    id: number;
-    content: string;
-    sender: string;
-    timestamp: Date;
-    aIQueueId: number | null;
-    isSkipped: boolean;
-    createdAt: Date;
-    aIResponseId: number | null;
-    livestreamId: number;
-  }[];
-} & {
-  id: number;
-  createdAt: Date;
-  livestreamId: number;
-  status: "x" | "y" | "z";
-  updatedAt: Date;
-  bullMQJobId: string | null;
-  priority: number;
-  isPartOfBatch: boolean;
-} | null
+// // Simulate Prisma types
+// type AIQueue = {
+//   id: number;
+//   createdAt: Date;
+//   livestreamId: number;
+//   status: $Enums.ResponseStatusEnum;
+//   updatedAt: Date;
+//   bullMQJobId: string | null;
+//   priority: number;
+//   isPartOfBatch: boolean;
+//   interactions: Interaction[];
+//   livestream: {
+//     livestreamSetting: {
+//       id: number
+//     }
+//     socialPlatformAccount: {
+//       brand: {
+//         aIAgents: {
+//           setting: {
+//             id: number
+//           }
+//         }[]
+//       }
+//     }
+//   }
+// } | null;
 
-type TestType = {
-  getPrismaObject: () => PrismaResponse;
-  getPrismaObjectPromise: () => Promise<PrismaResponse>;
-  normalString: string;
-};
+// type Interaction = {
+//   type: $Enums.InteractionTypeEnum;
+//   id: number;
+//   content: string;
+//   sender: string;
+//   timestamp: Date;
+//   aIQueueId: number | null;
+//   isSkipped: boolean;
+//   createdAt: Date;
+//   aIResponseId: number | null;
+//   livestreamId: number;
+// };
 
-class TestController {
-  getPrismaObject(): PrismaResponse {
-    return {
-      interactions: [{
-        type: 'a',
-        id: 1,
-        content: "string",
-        sender: "string",
-        timestamp: new Date(),
-        aIQueueId: null,
-        isSkipped: false,
-        createdAt: new Date(),
-        aIResponseId: null,
-        livestreamId: 1
-      }],
-      id: 1,
-      createdAt: new Date(),
-      livestreamId: 1,
-      status: 'x',
-      updatedAt: new Date(),
-      bullMQJobId: null,
-      priority: 1,
-      isPartOfBatch: false
-    }
-  }
+// class AIQueueController {
+//   async findFirst(
+//     {
+//       where,
+//       include
+//     }: {
+//       where: {
+//         interactions: {
+//           some: {
+//             type: $Enums.InteractionTypeEnum
+//           }
+//         }
+//       },
+//       include: {
+//         interactions: boolean;
+//         livestream: {
+//           include: {
+//             livestreamSetting: boolean,
+//             socialPlatformAccount: {
+//               include: {
+//                 brand: {
+//                   include: {
+//                     aIAgents: {
+//                       include: {
+//                         setting: boolean
+//                       }
+//                     }
+//                   }
+//                 }
+//               }
+//             }
+//           }
+//         }
+//       }
+//     }): Promise<AIQueue> {
+//     return {
+//       id: 1,
+//       createdAt: new Date(),
+//       livestreamId: 1,
+//       status: 'PENDING',
+//       updatedAt: new Date(),
+//       bullMQJobId: null,
+//       priority: 1,
+//       isPartOfBatch: false,
+//       interactions: [],
+//       livestream: {
+//         livestreamSetting: {
+//           id: 1
+//         },
+//         socialPlatformAccount: {
+//           brand: {
+//             aIAgents: [{
+//               setting: {
+//                 id: 1
+//               }
+//             }]
+//           }
+//         }
+//       }
+//     };
+//   }
+// }
+// class RPCServices {
+//   AIQueueController: TransformToPromise<AIQueueController>;
 
-  async getPrismaObjectPromise(): Promise<PrismaResponse> {
-    return {
-      interactions: [{
-        type: 'a',
-        id: 1,
-        content: "string",
-        sender: "string",
-        timestamp: new Date(),
-        aIQueueId: null,
-        isSkipped: false,
-        createdAt: new Date(),
-        aIResponseId: null,
-        livestreamId: 1
-      }],
-      id: 1,
-      createdAt: new Date(),
-      livestreamId: 1,
-      status: 'x',
-      updatedAt: new Date(),
-      bullMQJobId: null,
-      priority: 1,
-      isPartOfBatch: false
-    }
-  }
-  normalString: string = 'test'
-}
-
-
-const test = async () => {
-  const rpcServer = new RPCServer({ logLevel: 'debug' });
-  await rpcServer.start();
-  const testController = new TestController();
-  await rpcServer.handleRequest(testController);
-  const rpcClient = new RPCClient({ logLevel: 'debug' });
-  await rpcClient.start();
-  const api: ClassTypeProxy<TestType> = rpcClient.createProxy(TestController);
-
-  const result = await api.getPrismaObject();
-  const result2 = await api.getPrismaObjectPromise();
-  const result3 = api.normalString
-
-  console.log(result, result2, result3)
-  await rpcClient.close()
-  await rpcServer.close()
-};
-
-
-test();
+//   constructor(private rpcClient: RPCClient) {
+//     this.AIQueueController = this.rpcClient.createProxy(AIQueueController);
+//   }
+// }
+// const test = async () => {
+//   const rpcServer = new RPCServer({ logLevel: 'debug' });
+//   await rpcServer.start();
+//   const aIQueueController = new AIQueueController()
+//   await rpcServer.handleRequest(aIQueueController);
+//   const rpcClient = new RPCClient({ logLevel: 'debug' });
+//   await rpcClient.start();
+//   const rpcServices = new RPCServices(rpcClient);
+//   const interactionFilter = {
+//     type: 'CHAT' as $Enums.InteractionTypeEnum
+//   };
+//   const aiQueueData = await rpcServices.AIQueueController.findFirst({
+//     where: {
+//       interactions: { some: interactionFilter },
+//     },
+//     include: {
+//       interactions: true,
+//       livestream: {
+//         include: {
+//           livestreamSetting: true,
+//           socialPlatformAccount: {
+//             include: {
+//               brand: {
+//                 include: {
+//                   aIAgents: {
+//                     include: { setting: true },
+//                   },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     },
+//   });
+//   console.log(aiQueueData)
+//   await rpcClient.close()
+//   await rpcServer.close()
+// };
+// test();
