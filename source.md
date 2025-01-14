@@ -58,7 +58,7 @@
 // package.json
 {
   "name": "rpc-nats-alvamind",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "A flexible RPC library using NATS",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -113,6 +113,9 @@ export const getCodec = <T = unknown>(codec: SupportedCodec | NatsCodec<T> = "js
 import { NatsCodec } from './codec.interface';
 export class JsonCodec<T> implements NatsCodec<T> {
   encode(data: T): Uint8Array {
+    if (data === null || data === undefined) {
+      return new Uint8Array(0); // Return empty array for null/undefined
+    }
     const serialized = JSON.stringify(data, (_, value) => {
       if (value instanceof Date) {
         return { __type: 'Date', value: value.toISOString() };
@@ -131,6 +134,9 @@ export class JsonCodec<T> implements NatsCodec<T> {
     return new TextEncoder().encode(serialized);
   }
   decode(data: Uint8Array): T {
+    if (data.length === 0) {
+      return null as T; // Return null for empty array
+    }
     return JSON.parse(new TextDecoder().decode(data), (_, value) => {
       if (value && typeof value === 'object') {
         switch (value.__type) {
@@ -196,7 +202,8 @@ import {
   NatsConnection,
   SubscriptionOptions,
   JetStreamClient,
-  Subscription
+  Subscription,
+  Msg
 } from "nats";
 import { getCodec } from "../codec/codec";
 import { INatsClient } from "./nats-client.interface";
@@ -284,22 +291,26 @@ export class NatsClient implements INatsClient {
   }
   async request<TRequest = unknown, TResponse = unknown>(
     subject: string,
-    data: TRequest | null, // Accept null explicitly
-    timeout = 5000
+    data: TRequest | null,
+    timeout = 30000
   ): Promise<TResponse> {
     if (!this.nc) {
       throw new Error("Nats client not initialized yet");
     }
+    const encoded = data !== null ? this.codec.encode(data) : undefined;
     try {
       Logger.debug(`Sending request to ${subject}:`, data);
-      const encoded = data !== null ? this.codec.encode(data) : undefined;
-      const response = await this.nc.request(subject, encoded, { timeout });
-      const decoded = this.codec.decode(response.data) as TResponse;
+      const response = await this.nc!.request(subject, encoded, { timeout }) as Msg;
+      const decoded = response.data?.length ? this.codec.decode(response.data) as TResponse : null as TResponse;
       Logger.debug(`Received response from ${subject}:`, decoded);
       return decoded;
     } catch (error) {
       Logger.error(`Request failed for ${subject}:`, error);
-      throw error;
+      if ((error as Error).message === 'TIMEOUT') {
+        throw new Error('TimeoutError');
+      } else {
+        throw error;
+      }
     }
   }
   async unsubscribe(subject: string): Promise<void> {
@@ -356,7 +367,7 @@ export class RPCClient implements IRPCClient {
   private methodCache: Map<string, Map<string, Function>> = new Map();
   constructor(options: RPCClientOptions = defaultNatsOptions) {
     this.natsClient = new NatsClient(options);
-    this.timeout = options.timeout || 5000; // Default 5 second timeout
+    this.timeout = options.timeout || 30000; // Default 30 second timeout
     Logger.setLogLevel(options?.logLevel ?? defaultNatsOptions.logLevel);
   }
   async start(): Promise<void> {
@@ -395,38 +406,75 @@ export class RPCClient implements IRPCClient {
     const handler: ProxyHandler<ClassTypeProxy<T>> = {
       get: (_target: ClassTypeProxy<T>, p: string | symbol, _receiver: any) => {
         const methodName = p.toString();
-        const cachedMethod = this.methodCache.get(className)?.get(p.toString());
-        if (cachedMethod) {
-          return cachedMethod;
+        if (this.methodCache.get(className)?.has(methodName)) {
+          return this.methodCache.get(className)?.get(methodName);
         }
         const methodProxy = async (...args: any[]): Promise<any> => {
           const subject = `${className}.${methodName}`;
           const input = args[0]; // Take first argument as input
           Logger.debug(`Client requesting to subject: ${subject}`, input);
           try {
-            const response = await this.natsClient.request(
-              subject,
-              input !== undefined ? input : null, // Send null if input is undefined
-              this.timeout
-            );
+            const response = await this.natsClient.request(subject, input !== undefined ? input : null, this.timeout) as Record<string, any> | null;
             Logger.debug(`Received response from ${subject}:`, response);
+            if (response && typeof response === 'object' && response['__null'] === true) {
+              return null;
+            }
             if (response && typeof response === 'object' && 'error' in response) {
-              throw new Error(response.error as string);
+              const errorResponse = response as { error: string, errorType?: string }
+              if (errorResponse.errorType) {
+                const ErrorConstructor = globalThis[errorResponse.errorType as keyof typeof globalThis] as typeof Error
+                if (ErrorConstructor) {
+                  throw new ErrorConstructor(errorResponse.error);
+                }
+              }
+              throw new Error(errorResponse.error);
             }
             return response;
-          } catch (error) {
-            Logger.error(
-              `Error calling method "${methodName}" on class "${className}":`,
-              error
-            );
+          }
+          catch (error) {
+            Logger.error(`Error calling method "${methodName}" on class "${className}":`, error);
             throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
           }
         };
         this.methodCache.get(className)?.set(methodName, methodProxy);
         return methodProxy;
       }
-    };
-    return new Proxy({} as ClassTypeProxy<T>, handler);
+    }
+    const proxy = new Proxy({} as ClassTypeProxy<T>, handler);
+    const methods = Object.getOwnPropertyNames(classConstructor.prototype).filter(method => method !== "constructor")
+    methods.forEach(methodName => {
+      if (!this.methodCache.get(className)?.has(methodName)) {
+        const subject = `${className}.${methodName}`;
+        const methodProxy = async (...args: any[]): Promise<any> => {
+          const input = args[0];
+          Logger.debug(`Client requesting to subject: ${subject}`, input);
+          try {
+            const response = await this.natsClient.request(subject, input !== undefined ? input : null, this.timeout) as Record<string, any> | null;
+            Logger.debug(`Received response from ${subject}:`, response);
+            if (response && typeof response === 'object' && response['__null'] === true) {
+              return null;
+            }
+            if (response && typeof response === 'object' && 'error' in response) {
+              const errorResponse = response as { error: string, errorType?: string }
+              if (errorResponse.errorType) {
+                const ErrorConstructor = globalThis[errorResponse.errorType as keyof typeof globalThis] as typeof Error
+                if (ErrorConstructor) {
+                  throw new ErrorConstructor(errorResponse.error);
+                }
+              }
+              throw new Error(errorResponse.error);
+            }
+            return response;
+          }
+          catch (error) {
+            Logger.error(`Error calling method "${methodName}" on class "${className}":`, error);
+            throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
+          }
+        };
+        this.methodCache.get(className)?.set(methodName, methodProxy)
+      }
+    })
+    return proxy;
   }
   getAvailableMethods(className: string): string[] {
     const methods = this.methodCache.get(className);
@@ -582,9 +630,7 @@ export class RPCServer implements IRPCServer {
         this.retryConfig,
         onRetry
       );
-      if (result) {
-        await this.natsClient.publish(reply, result);
-      }
+      await this.natsClient.publish(reply, result);
     } catch (error) {
       Logger.error(`Request to ${className}.${methodName} failed after all retries:`, error);
       if (this.dlqSubject) {
@@ -592,13 +638,15 @@ export class RPCServer implements IRPCServer {
           className,
           methodName,
           data,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.constructor.name : "Error"
         };
         await this.natsClient.publish(this.dlqSubject, dlqMessage);
         Logger.info(`Message sent to DLQ ${this.dlqSubject}`);
       }
       await this.natsClient.publish(reply, {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : "Error"
       });
     }
   }
@@ -615,14 +663,16 @@ export class RPCServer implements IRPCServer {
     }
     try {
       const result = await method.call(instance, data);
-      Logger.debug(`Successfully processed ${className}.${methodName}`, {
-        input: data,
-        output: result
-      });
+      if (result === null) {
+        return { __null: true };
+      }
       return result;
     } catch (error) {
       Logger.error(`Error executing "${methodName}" in class "${className}":`, error);
-      throw error;
+      throw {
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : "Error"
+      };
     }
   }
   public getRegisteredMethods(): Map<string, Set<string>> {
@@ -919,3 +969,28 @@ export interface Config {
     "noEmit": true
   }
 }
+
+// welcome.js
+#!/usr/bin/env node
+import chalk from 'chalk';
+console.log(chalk.green('\n✨ Thank you for installing rpc-nats-alvamind! ✨\n'));
+console.log(chalk.cyan('To generate RPC services, use the following command:'));
+console.log(
+  chalk.yellow('\nrpc-nats generate --includes="src*.controller.ts" --output="src/common/rpc/rpc-services.ts"\n'),
+);
+console.log(chalk.cyan('Options:'));
+console.log(chalk.white('  --includes    Glob patterns for including files (required)'));
+console.log(chalk.white('  --excludes    Glob patterns for excluding files'));
+console.log(chalk.white('  --output      Output file path'));
+console.log(chalk.white('  --watch       Watch for file changes and regenerate'));
+console.log(chalk.white('  --logLevel    Log level (debug, info, warn, error)\n'));
+console.log(chalk.cyan('Example with multiple includes and excludes:'));
+console.log(
+  chalk.yellow(
+    'rpc-nats generate \\\n  --includes="src*.controller.ts" "src*.service.ts" \\\n  --excludes="src*.spec.ts" "src*.test.ts" \\\n  --output="src/common/rpc/rpc-services.ts" \\\n  --watch\n',
+  ),
+);
+console.log(chalk.cyan('Documentation:'));
+console.log(chalk.white('  https://github.com/alvamind/rpc-nats-alvamind\n'));
+console.log(chalk.green('Happy coding! 🚀\n'));
+
