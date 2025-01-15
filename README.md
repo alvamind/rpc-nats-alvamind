@@ -11,7 +11,8 @@
 *   **💨 NATS Power:** Built on top of NATS, leveraging its speed and reliability for high-performance messaging.
 *   **🔌 Codec Flexibility:** Supports `json` and `string` codecs. Easily plug in your own!
 *   **🎯 Type-Safe Proxies:** Generate client proxies with strong typing, reducing runtime errors.
-*   **🛡️ Error Handling:**  Handles errors gracefully with retry logic and dead-letter queue (DLQ) support.
+    *   Choose between `ClassTypeProxy` or `as unknown as ClassName` casting for generated proxies.
+*   **🛡️ Error Handling:** Handles errors gracefully with retry logic and dead-letter queue (DLQ) support.
 *   **⏱️ Customizable Timeouts:** Set timeouts for requests to prevent hanging calls.
 *   **🔄 Prototype Chain Support:** Works flawlessly with class inheritance, making your life easier.
 *   **🪵 Logger Integration:** Includes built-in logging with `logger-alvamind` for easy debugging.
@@ -72,6 +73,7 @@ async function main() {
 
 main();
 ```
+
 ### 2. Creating a Client Proxy
 
 ```typescript
@@ -114,10 +116,12 @@ async function main() {
 
 main();
 ```
+
 ### 3. Codec Usage
 
 ```typescript
 import { RPCServer, RPCClient, ClassTypeProxy, getCodec } from 'rpc-nats-alvamind';
+
 // Server Side
 class MyService {
   async hello(name: string): Promise<string> {
@@ -131,6 +135,7 @@ async function mainServer() {
   await server.handleRequest(new MyService());
 }
 mainServer();
+
 // Client Side
 class MyService {
     hello(name: string): Promise<string> {
@@ -147,9 +152,12 @@ async function mainClient() {
 }
 mainClient();
 ```
+
 ### 4. Custom Codec Usage
+
 ```typescript
 import { RPCServer, RPCClient, ClassTypeProxy, NatsCodec } from 'rpc-nats-alvamind';
+
 // Server Side
 //Custom Codec
 class MyCustomCodec implements NatsCodec<any>{
@@ -161,6 +169,7 @@ class MyCustomCodec implements NatsCodec<any>{
     return JSON.parse(value);
   }
 }
+
 class MyService {
   async hello(name: string): Promise<string> {
     return `Hello, ${name}!`;
@@ -174,6 +183,7 @@ async function mainServer() {
   await server.handleRequest(new MyService());
 }
 mainServer();
+
 // Client Side
 class MyService {
   hello(name: string): Promise<string> {
@@ -192,7 +202,9 @@ async function mainClient() {
 }
 mainClient();
 ```
+
 ### 5. Error Handling
+
 ```typescript
 import { RPCServer, RPCClient, ClassTypeProxy } from 'rpc-nats-alvamind';
 
@@ -224,6 +236,7 @@ async function main() {
 
 main();
 ```
+
 ### 6. Retry with DLQ (Dead Letter Queue)
 
 ```typescript
@@ -234,7 +247,9 @@ interface DLQMessage {
   methodName: string;
   data: any;
   error: string;
+  errorType: string
 }
+
 // Define your service classes
 class MyService {
   async flakyCall(): Promise<string> {
@@ -279,11 +294,50 @@ async function main() {
 main();
 ```
 
+### 7. Generating Client Proxies with `rpc-nats` CLI
+
+The `rpc-nats-alvamind` package includes a CLI tool to automatically generate the `rpc-services.ts` file containing client proxies. This tool is particularly useful for large projects.
+
+To generate RPC services, use the following command:
+
+```bash
+rpc-nats generate --includes="src/**/*.controller.ts" --output="src/common/rpc/rpc-services.ts"
+```
+
+**Options:**
+
+*   `--includes`: Glob patterns for including files (required).
+*   `--excludes`: Glob patterns for excluding files.
+*   `--output`: Output file path.
+*   `--watch`: Watch for file changes and regenerate.
+*   `--logLevel`: Log level (debug, info, warn, error).
+*   `--proxyType`: Type of proxy generation, `proxy` (default), generate proxies using `ClassTypeProxy` or `cast` to generate proxies with casting with `as unknown as ClassName`
+
+**Examples:**
+
+```bash
+# Generate rpc-services.ts using ClassTypeProxy
+rpc-nats generate --includes="src/**/*.controller.ts" --output="src/common/rpc/rpc-services.ts"
+
+# Generate rpc-services.ts with casting
+rpc-nats generate --includes="src/**/*.controller.ts" --output="src/common/rpc/rpc-services.ts" --proxyType=cast
+
+# Multiple includes and excludes with watch mode
+rpc-nats generate \
+  --includes="src/**/*.controller.ts" "src/**/*.service.ts" \
+  --excludes="src/**/*.spec.ts" "src/**/*.test.ts" \
+  --output="src/common/rpc/rpc-services.ts" \
+  --watch
+```
+
 ###  🧪 Testing
+
 To run the test suite:
+
 ```bash
 bun test test/*.test.ts
 ```
+
 ## 📜 API Reference
 
 ### `RPCServer`
@@ -295,6 +349,7 @@ bun test test/*.test.ts
 *    `isConnected(): boolean`: Checks whether nats client is connected
 *   `getRegisteredMethods(): Map<string, Set<string>>`: get all registered methods.
 *   `isMethodRegistered(className: string, methodName: string): boolean`: check if method is registered.
+
 ### `RPCClient`
 
 *   `constructor(options: RPCClientOptions)`: Creates a new RPC client instance.
@@ -308,6 +363,7 @@ bun test test/*.test.ts
 *   `getTimeout(): number`: Gets the current timeout.
 *   `clearMethodCache(className?: string): void`: Clears method cache.
 *   `getStats(): { isConnected: boolean; cachedClasses: number; totalCachedMethods: number; timeout: number; }`: Gets client stats.
+
 ### `NatsOptions`
 
 *   `url?: string`: NATS server URL (`nats://localhost:4222` by default).
@@ -315,6 +371,7 @@ bun test test/*.test.ts
 *   `debug?: boolean`: Enable debug logs.
 
 ### `RPCServerOptions`
+
 *  `retry?: { attempts: number; delay: number; }`: Configure retries.
 *  `dlq?: string`: Dead Letter Queue Subject.
 
@@ -348,7 +405,9 @@ class MyCustomCodec<T> implements NatsCodec<T> {
   }
 }
 ```
+
 Then you can pass the codec instance to `RPCServer` and `RPCClient` options like:
+
 ```typescript
   const codec = new MyCustomCodec<any>();
   const server = new RPCServer({ url: 'nats://localhost:4222', codec: codec });
@@ -356,6 +415,7 @@ Then you can pass the codec instance to `RPCServer` and `RPCClient` options like
 ```
 
 ### 🪵 Logging
+
 This library use `logger-alvamind` to provide logging functionality, to see `debug` logs pass `{debug: true}` to constructor options of `RPCServer` and `RPCClient` or set `process.env.DEBUG` or set `NODE_ENV=test`.
 
 ## 🤝 Contributing
@@ -363,6 +423,7 @@ This library use `logger-alvamind` to provide logging functionality, to see `deb
 Contributions are welcome! Feel free to submit pull requests or open issues on the [GitHub repository](https://github.com/alvamind/rpc-nats-alvamind).
 
 ### Contribution Guidelines
+
 1.  Fork the repository.
 2.  Create a new branch.
 3.  Make your changes and ensure that tests pass
@@ -382,4 +443,5 @@ This library is provided "as is" without any warranties. Use at your own risk!
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](https://github.com/alvamind/rpc-nats-alvamind/blob/main/LICENSE) file for details.
+
 ### Thank you and Happy Coding! 🚀🎉

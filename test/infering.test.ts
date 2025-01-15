@@ -1,13 +1,10 @@
-// import { RPCClient, ClassTypeProxy, RPCServer, TransformToPromise } from '../index';
-// import { $Enums } from '@prisma/client';
-
+// import { RPCClient, RPCServer, TransformToPromise } from "../src";
 
 // // Simulate Prisma types
 // type AIQueue = {
 //   id: number;
 //   createdAt: Date;
 //   livestreamId: number;
-//   status: $Enums.ResponseStatusEnum;
 //   updatedAt: Date;
 //   bullMQJobId: string | null;
 //   priority: number;
@@ -30,7 +27,6 @@
 // } | null;
 
 // type Interaction = {
-//   type: $Enums.InteractionTypeEnum;
 //   id: number;
 //   content: string;
 //   sender: string;
@@ -43,31 +39,24 @@
 // };
 
 // class AIQueueController {
-//   async findFirst(
-//     {
-//       where,
-//       include
-//     }: {
-//       where: {
-//         interactions: {
-//           some: {
-//             type: $Enums.InteractionTypeEnum
-//           }
-//         }
-//       },
-//       include: {
-//         interactions: boolean;
-//         livestream: {
-//           include: {
-//             livestreamSetting: boolean,
-//             socialPlatformAccount: {
-//               include: {
-//                 brand: {
-//                   include: {
-//                     aIAgents: {
-//                       include: {
-//                         setting: boolean
-//                       }
+//   async findFirst(params: {
+//     where: {
+//       interactions: {
+//         id: number
+//       }
+//     },
+//     include: {
+//       interactions: boolean;
+//       livestream: {
+//         include: {
+//           livestreamSetting: boolean,
+//           socialPlatformAccount: {
+//             include: {
+//               brand: {
+//                 include: {
+//                   aIAgents: {
+//                     include: {
+//                       setting: boolean
 //                     }
 //                   }
 //                 }
@@ -76,12 +65,12 @@
 //           }
 //         }
 //       }
-//     }): Promise<AIQueue> {
+//     }
+//   }): Promise<AIQueue> {
 //     return {
 //       id: 1,
 //       createdAt: new Date(),
 //       livestreamId: 1,
-//       status: 'PENDING',
 //       updatedAt: new Date(),
 //       bullMQJobId: null,
 //       priority: 1,
@@ -105,10 +94,10 @@
 //   }
 // }
 // class RPCServices {
-//   AIQueueController: TransformToPromise<AIQueueController>;
+//   AIQueueController: AIQueueController;
 
 //   constructor(private rpcClient: RPCClient) {
-//     this.AIQueueController = this.rpcClient.createProxy(AIQueueController);
+//     this.AIQueueController = this.rpcClient.createProxy(AIQueueController) as unknown as AIQueueController;;
 //   }
 // }
 // const test = async () => {
@@ -119,12 +108,10 @@
 //   const rpcClient = new RPCClient({ logLevel: 'debug' });
 //   await rpcClient.start();
 //   const rpcServices = new RPCServices(rpcClient);
-//   const interactionFilter = {
-//     type: 'CHAT' as $Enums.InteractionTypeEnum
-//   };
+
 //   const aiQueueData = await rpcServices.AIQueueController.findFirst({
 //     where: {
-//       interactions: { some: interactionFilter },
+//       interactions: { id: 2 },
 //     },
 //     include: {
 //       interactions: true,

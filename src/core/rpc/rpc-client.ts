@@ -1,5 +1,5 @@
 import { NatsClient } from '../nats/nats-client';
-import { defaultNatsOptions, TransformToPromise } from '../../types';
+import { defaultNatsOptions, ClassType, ClassTypeProxy } from '../../types';
 import { Logger } from '../utils/logger';
 import { IRPCClient, RPCClientOptions } from './rpc-client.interface';
 
@@ -39,9 +39,9 @@ export class RPCClient implements IRPCClient {
     return this.isStarted && this.natsClient.isConnected();
   }
 
-  createProxy<T extends object>(
+  createProxy<T extends ClassType>(
     classConstructor: new (...args: any[]) => T
-  ): TransformToPromise<T> {
+  ): ClassTypeProxy<T> {
     if (!this.isStarted) {
       throw new Error('RPC Client not started. Call start() first.');
     }
@@ -50,9 +50,10 @@ export class RPCClient implements IRPCClient {
     if (!this.methodCache.has(className)) {
       this.methodCache.set(className, new Map());
     }
-
-    const handler: ProxyHandler<TransformToPromise<T>> = {
-      get: (_target: TransformToPromise<T>, p: string | symbol, _receiver: any) => {
+    // This is not necessary because the type is already resolved in the proxy.
+    //const methods = Object.getOwnPropertyNames(classConstructor.prototype).filter(method => method !== "constructor")
+    const handler: ProxyHandler<ClassTypeProxy<T>> = {
+      get: (_target: ClassTypeProxy<T>, p: string | symbol, _receiver: any) => {
         const methodName = p.toString();
         if (this.methodCache.get(className)?.has(methodName)) {
           return this.methodCache.get(className)?.get(methodName);
@@ -88,7 +89,42 @@ export class RPCClient implements IRPCClient {
         return methodProxy;
       }
     }
-    return new Proxy({} as TransformToPromise<T>, handler)
+    const proxy = new Proxy({} as ClassTypeProxy<T>, handler);
+
+    // This loop is redundant since the proxy returns the functions as expected.
+    /* methods.forEach(methodName => {
+       if (!this.methodCache.get(className)?.has(methodName)) {
+         const subject = `${className}.${methodName}`;
+         const methodProxy = async (...args: any[]): Promise<any> => {
+           const input = args[0];
+           Logger.debug(`Client requesting to subject: ${subject}`, input);
+           try {
+             const response = await this.natsClient.request(subject, input !== undefined ? input : null, this.timeout) as Record<string, any> | null;
+             Logger.debug(`Received response from ${subject}:`, response);
+             if (response && typeof response === 'object' && response['__null'] === true) {
+               return null;
+             }
+             if (response && typeof response === 'object' && 'error' in response) {
+               const errorResponse = response as { error: string, errorType?: string }
+               if (errorResponse.errorType) {
+                 const ErrorConstructor = globalThis[errorResponse.errorType as keyof typeof globalThis] as typeof Error
+                 if (ErrorConstructor) {
+                   throw new ErrorConstructor(errorResponse.error);
+                 }
+               }
+               throw new Error(errorResponse.error);
+             }
+             return response;
+           }
+           catch (error) {
+             Logger.error(`Error calling method "${methodName}" on class "${className}":`, error);
+             throw error instanceof Error ? error : new Error(`RPC call failed: ${error}`);
+           }
+         };
+         this.methodCache.get(className)?.set(methodName, methodProxy)
+       }
+     }) */
+    return proxy;
   }
 
   getAvailableMethods(className: string): string[] {
